@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -48,6 +49,7 @@ import land.oras.utils.Const;
 import land.oras.utils.DigestUtils;
 import land.oras.utils.JsonUtils;
 import land.oras.utils.OrasHttpClient;
+import land.oras.utils.SupportedAlgorithm;
 import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -349,45 +351,7 @@ public final class Registry {
             config = config.withAnnotations(annotations);
             manifest = manifest.withConfig(config);
         }
-        List<Layer> layers = new ArrayList<>();
-        // Upload all files as blobs
-        for (LocalPath path : paths) {
-            try {
-                // Create tar.gz archive for directory
-                if (Files.isDirectory(path.getPath())) {
-                    LocalPath tempTar = ArchiveUtils.tar(path);
-                    LocalPath tempArchive = ArchiveUtils.compress(tempTar, path.getMediaType());
-                    try (InputStream is = Files.newInputStream(tempArchive.getPath())) {
-                        long size = Files.size(tempArchive.getPath());
-                        Layer layer = pushBlobStream(containerRef, is, size)
-                                .withMediaType(path.getMediaType())
-                                .withAnnotations(Map.of(
-                                        Const.ANNOTATION_TITLE,
-                                        path.getPath().getFileName().toString(),
-                                        Const.ANNOTATION_ORAS_CONTENT_DIGEST,
-                                        containerRef.getAlgorithm().digest(tempTar.getPath()),
-                                        Const.ANNOTATION_ORAS_UNPACK,
-                                        "true"));
-                        layers.add(layer);
-                        LOG.info("Uploaded directory: {}", layer.getDigest());
-                    }
-                    Files.delete(tempArchive.getPath());
-                } else {
-                    try (InputStream is = Files.newInputStream(path.getPath())) {
-                        long size = Files.size(path.getPath());
-                        Layer layer = pushBlobStream(containerRef, is, size)
-                                .withMediaType(path.getMediaType())
-                                .withAnnotations(Map.of(
-                                        Const.ANNOTATION_TITLE,
-                                        path.getPath().getFileName().toString()));
-                        layers.add(layer);
-                        LOG.info("Uploaded: {}", layer.getDigest());
-                    }
-                }
-            } catch (IOException e) {
-                throw new OrasException("Failed to push artifact", e);
-            }
-        }
+        List<Layer> layers = pushLayers(containerRef, paths);
         // Push the config like any other blob
         Config pushedConfig = pushConfig(containerRef, config != null ? config : Config.empty());
 
@@ -434,6 +398,42 @@ public final class Registry {
 
         // Copy manifest
         targetRegistry.pushManifest(targetContainer, sourceManifest);
+    }
+
+    /**
+     * Attach file to an existing manifest
+     * @param containerRef The container
+     * @param artifactType The artifact type
+     * @param annotations The annotations
+     * @param paths The paths
+     * @return The manifest of the new artifact
+     */
+    public Manifest attachArtifact(
+            ContainerRef containerRef, String artifactType, Annotations annotations, LocalPath... paths) {
+
+        // Push layers
+        List<Layer> layers = pushLayers(containerRef, paths);
+
+        // Get the subject from the manifest
+        Subject subject = getManifest(containerRef).getDescriptor().toSubject();
+
+        // Add created annotation if not present since we push with digest
+        Map<String, String> manifestAnnotations = annotations.manifestAnnotations();
+        if (!manifestAnnotations.containsKey(Const.ANNOTATION_CREATED)) {
+            manifestAnnotations.put(Const.ANNOTATION_CREATED, Const.currentTimestamp());
+        }
+
+        // assemble manifest
+        Manifest manifest = Manifest.empty()
+                .withArtifactType(artifactType)
+                .withAnnotations(manifestAnnotations)
+                .withLayers(layers)
+                .withSubject(subject);
+
+        return pushManifest(
+                containerRef.withDigest(
+                        SupportedAlgorithm.SHA256.digest(manifest.toJson().getBytes(StandardCharsets.UTF_8))),
+                manifest);
     }
 
     /**
@@ -928,5 +928,47 @@ public final class Registry {
     public InputStream getBlobStream(ContainerRef containerRef) {
         // Similar to fetchBlob()
         return fetchBlob(containerRef);
+    }
+
+    private List<Layer> pushLayers(ContainerRef containerRef, LocalPath... paths) {
+        List<Layer> layers = new ArrayList<>();
+        for (LocalPath path : paths) {
+            try {
+                // Create tar.gz archive for directory
+                if (Files.isDirectory(path.getPath())) {
+                    LocalPath tempTar = ArchiveUtils.tar(path);
+                    LocalPath tempArchive = ArchiveUtils.compress(tempTar, path.getMediaType());
+                    try (InputStream is = Files.newInputStream(tempArchive.getPath())) {
+                        long size = Files.size(tempArchive.getPath());
+                        Layer layer = pushBlobStream(containerRef, is, size)
+                                .withMediaType(path.getMediaType())
+                                .withAnnotations(Map.of(
+                                        Const.ANNOTATION_TITLE,
+                                        path.getPath().getFileName().toString(),
+                                        Const.ANNOTATION_ORAS_CONTENT_DIGEST,
+                                        containerRef.getAlgorithm().digest(tempTar.getPath()),
+                                        Const.ANNOTATION_ORAS_UNPACK,
+                                        "true"));
+                        layers.add(layer);
+                        LOG.info("Uploaded directory: {}", layer.getDigest());
+                    }
+                    Files.delete(tempArchive.getPath());
+                } else {
+                    try (InputStream is = Files.newInputStream(path.getPath())) {
+                        long size = Files.size(path.getPath());
+                        Layer layer = pushBlobStream(containerRef, is, size)
+                                .withMediaType(path.getMediaType())
+                                .withAnnotations(Map.of(
+                                        Const.ANNOTATION_TITLE,
+                                        path.getPath().getFileName().toString()));
+                        layers.add(layer);
+                        LOG.info("Uploaded: {}", layer.getDigest());
+                    }
+                }
+            } catch (IOException e) {
+                throw new OrasException("Failed to push artifact", e);
+            }
+        }
+        return layers;
     }
 }

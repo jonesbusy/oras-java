@@ -535,46 +535,45 @@ public class RegistryTest {
         Files.writeString(pomFile, "my pom file");
 
         // Push the main OCI artifact
-        Manifest manifest = registry.pushArtifact(containerRef, "maven", LocalPath.of(pomFile, "application/xml"));
+        Manifest manifest = registry.pushArtifact(
+                containerRef, "application/vnd.example+type", LocalPath.of(pomFile, "application/xml"));
 
         // Push the signature
         Path signedPomFile = blobDir.resolve("pom.xml.asc");
         Files.writeString(signedPomFile, "my signed pom file");
 
-        Layer layer =
-                registry.pushBlobStream(containerRef, Files.newInputStream(signedPomFile), Files.size(signedPomFile));
-        layer = layer.withAnnotations(Map.of(Const.ANNOTATION_TITLE, "pom.xml.asc"))
-                .withMediaType("application/pgp-signature");
+        // Attach artifactf
+        Manifest signedPomFileManifest = registry.attachArtifact(
+                containerRef,
+                "application/vnd.example+type",
+                Annotations.empty(),
+                LocalPath.of(signedPomFile, "application/pgp-signature"));
 
-        // Attach artifact
-        Manifest signedPomFileManifest = Manifest.empty()
-                .withSubject(manifest.getDescriptor().toSubject())
-                .withAnnotations(Map.of(Const.ANNOTATION_CREATED, Const.currentTimestamp()))
-                .withLayers(List.of(layer))
-                .withArtifactType("maven");
+        // Assert the manifest
+        assertEquals(1, signedPomFileManifest.getLayers().size());
+        assertEquals(1, signedPomFileManifest.getAnnotations().size());
+        assertNotNull(signedPomFileManifest.getAnnotations().get(Const.ANNOTATION_CREATED));
 
-        signedPomFileManifest = registry.pushManifest(
-                containerRef.withDigest(SupportedAlgorithm.SHA256.digest(
-                        signedPomFileManifest.toJson().getBytes(StandardCharsets.UTF_8))),
-                signedPomFileManifest);
+        // Ensure 1 referrers
+        Referrers referrers = registry.getReferrers(
+                containerRef.withDigest(manifest.getDescriptor().getDigest()), null);
+        assertEquals(1, referrers.getManifests().size());
+
+        // No created annotation
+        signedPomFileManifest = registry.attachArtifact(
+                containerRef,
+                "application/vnd.example+type",
+                Annotations.ofManifest(Map.of(Const.ANNOTATION_CREATED, Const.currentTimestamp())),
+                LocalPath.of(signedPomFile, "application/pgp-signature"));
 
         assertEquals(1, signedPomFileManifest.getLayers().size());
         assertEquals(1, signedPomFileManifest.getAnnotations().size());
         assertNotNull(signedPomFileManifest.getAnnotations().get(Const.ANNOTATION_CREATED));
 
-        // No created annotation
-        signedPomFileManifest = Manifest.empty()
-                .withSubject(manifest.getDescriptor().toSubject())
-                .withLayers(List.of(layer))
-                .withArtifactType("maven");
-        signedPomFileManifest = registry.pushManifest(
-                containerRef.withDigest(SupportedAlgorithm.SHA256.digest(
-                        signedPomFileManifest.toJson().getBytes(StandardCharsets.UTF_8))),
-                signedPomFileManifest);
-        assertEquals(1, signedPomFileManifest.getLayers().size());
-
-        // Annotation is not added because it would change the digest
-        assertEquals(0, signedPomFileManifest.getAnnotations().size());
+        // Ensure 2 referrers
+        referrers = registry.getReferrers(
+                containerRef.withDigest(manifest.getDescriptor().getDigest()), null);
+        assertEquals(2, referrers.getManifests().size());
     }
 
     @Test
