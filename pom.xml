@@ -93,6 +93,8 @@
     <sigstore-maven-plugin.version>2.0.0</sigstore-maven-plugin.version>
     <spdx-maven-plugin.version>1.0.3</spdx-maven-plugin.version>
     <maven-license-plugin.version>2.7.1</maven-license-plugin.version>
+    <errorprone.version>2.48.0</errorprone.version>
+    <nullaway.version>0.13.1</nullaway.version>
 
     <!-- Target Java 17 -->
     <maven.compiler.source>17</maven.compiler.source>
@@ -138,6 +140,11 @@
         <groupId>com.github.luben</groupId>
         <artifactId>zstd-jni</artifactId>
         <version>${zstd-jni.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.uber.nullaway</groupId>
+        <artifactId>nullaway</artifactId>
+        <version>${nullaway.version}</version>
       </dependency>
       <dependency>
         <groupId>io.github.classgraph</groupId>
@@ -428,6 +435,27 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-compiler-plugin</artifactId>
           <version>${maven-compiler-plugin.version}</version>
+          <configuration>
+            <compilerArgs>
+              <arg>-XDcompilePolicy=simple</arg>
+              <arg>--should-stop=ifError=FLOW</arg>
+              <arg>-Xplugin:ErrorProne</arg>
+              <arg>-XDaddTypeAnnotationsToSymbol=true</arg>
+              <arg>-XepOpt:NullAway:AnnotatedPackages=land.oras</arg>
+            </compilerArgs>
+            <annotationProcessorPaths>
+              <path>
+                <groupId>com.google.errorprone</groupId>
+                <artifactId>error_prone_core</artifactId>
+                <version>${errorprone.version}</version>
+              </path>
+              <path>
+                <groupId>com.uber.nullaway</groupId>
+                <artifactId>nullaway</artifactId>
+                <version>${nullaway.version}</version>
+              </path>
+            </annotationProcessorPaths>
+          </configuration>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
