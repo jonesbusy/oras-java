@@ -34,7 +34,7 @@ public abstract sealed class Ref<T extends Ref<T>> permits ContainerRef, LayoutR
     /**
      * The tag of the container.
      */
-    protected @Nullable final String tag;
+    protected final @Nullable String tag;
 
     /**
      * Constructor
