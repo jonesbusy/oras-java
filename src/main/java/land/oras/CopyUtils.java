@@ -241,7 +241,7 @@ public final class CopyUtils {
 
                     // Push the manifest
                     LOG.debug("Copying nested manifest {}", manifestDescriptor.getDigest());
-                    Manifest pushedManifest = target.pushManifest(
+                    target.pushManifest(
                             effectiveTargetRef.withDigest(manifest.getDigest()),
                             manifest.withDescriptor(manifestDescriptor));
                     LOG.debug("Copied nested manifest {}", manifestDescriptor.getDigest());
