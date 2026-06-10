@@ -606,7 +606,7 @@ public final class HttpClient {
             Scopes scopes,
             AuthProvider authProvider) {
         try {
-            HttpRequest.Builder builder = HttpRequest.newBuilder().uri(uri).method(method, bodyPublisher);
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().uri(uri).method(method, bodyPublisher);
 
             // Get scope based on method
             ContainerRef containerRef = scopes.getContainerRef();
@@ -636,16 +636,16 @@ public final class HttpClient {
                     && authHeader != null
                     && !authProvider.getAuthScheme().equals(AuthScheme.NONE)
                     && includeAuthHeader) {
-                builder = builder.header(Const.AUTHORIZATION_HEADER, authHeader);
+                requestBuilder = requestBuilder.header(Const.AUTHORIZATION_HEADER, authHeader);
             } else if (cachedToken != null && includeAuthHeader) {
-                builder = builder.header(Const.AUTHORIZATION_HEADER, "Bearer " + cachedToken.getEffectiveToken());
+                requestBuilder = requestBuilder.header(Const.AUTHORIZATION_HEADER, "Bearer " + cachedToken.getEffectiveToken());
             }
-            headers.forEach(builder::header);
+            headers.forEach(requestBuilder::header);
 
             // Add user agent
-            builder = builder.header(Const.USER_AGENT_HEADER, Versions.USER_AGENT_VALUE);
+            requestBuilder = requestBuilder.header(Const.USER_AGENT_HEADER, Versions.USER_AGENT_VALUE);
 
-            HttpRequest request = builder.build();
+            HttpRequest request = requestBuilder.build();
             logRequest(request, body);
             HttpResponse<T> response = executeAndRecordRequest(request, handler);
 
@@ -669,7 +669,7 @@ public final class HttpClient {
                         newScopes,
                         authProvider);
             }
-            return redoRequest(uri, response, builder, handler, newScopes, authProvider);
+            return redoRequest(uri, response, requestBuilder, handler, newScopes, authProvider);
         } catch (Exception e) {
             if (e instanceof OrasException) {
                 throw (OrasException) e;

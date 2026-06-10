@@ -62,6 +62,9 @@ import org.jspecify.annotations.Nullable;
 @NullMarked
 public final class Registry extends OCI<ContainerRef> {
 
+    private static final String HTTPS = "https";
+    private static final String SCHEME_REGISTRY_PATH_FORMAT = "%s://%s/%s";
+
     /**
      * Max concurrent downloads and upload for blobs
      */
@@ -95,7 +98,7 @@ public final class Registry extends OCI<ContainerRef> {
     /**
      * The default registry to use. If null will use registry from the container ref
      */
-    private @Nullable String registry;
+    private @Nullable String registryName;
 
     /**
      * Skip TLS verification
@@ -145,7 +148,7 @@ public final class Registry extends OCI<ContainerRef> {
         // Not the same auth
         String authHeaderSource = authProvider.getAuthHeader(sourceRef);
         String authHeaderTarget = otherRegistry.authProvider.getAuthHeader(targetRef);
-        if (!(authHeaderSource == authHeaderTarget
+        if (!((authHeaderSource == null && authHeaderTarget == null)
                 || (authHeaderSource != null
                         && authHeaderTarget != null
                         && MessageDigest.isEqual(
@@ -249,7 +252,7 @@ public final class Registry extends OCI<ContainerRef> {
      * @param registry The registry URL
      */
     private void setRegistry(String registry) {
-        this.registry = registry;
+        this.registryName = registry;
     }
 
     /**
@@ -315,7 +318,7 @@ public final class Registry extends OCI<ContainerRef> {
      * @return The scheme
      */
     public String getScheme() {
-        return insecure ? "http" : "https";
+        return insecure ? "http" : HTTPS;
     }
 
     /**
@@ -349,7 +352,7 @@ public final class Registry extends OCI<ContainerRef> {
      * @return The registry URL
      */
     public @Nullable String getRegistry() {
-        return registry;
+        return registryName;
     }
 
     @Override
@@ -389,8 +392,8 @@ public final class Registry extends OCI<ContainerRef> {
 
     @Override
     public Repositories getRepositories() {
-        if (registry != null
-                && getRegistriesConf().isInsecure(ContainerRef.parse(registry).forRegistry(registry))
+        if (registryName != null
+                && getRegistriesConf().isInsecure(ContainerRef.parse(registryName).forRegistry(registryName))
                 && !this.isInsecure()) {
             return asInsecure().getRepositories();
         }
@@ -625,9 +628,9 @@ public final class Registry extends OCI<ContainerRef> {
         if (response.statusCode() == 202) {
             String location = response.headers().get(Const.LOCATION_HEADER.toLowerCase());
             // Ensure location is absolute URI
-            if (!location.startsWith("http") && !location.startsWith("https")) {
+            if (!location.startsWith("http") && !location.startsWith(HTTPS)) {
                 location =
-                        "%s://%s/%s".formatted(getScheme(), ref.getApiRegistry(this), location.replaceFirst("^/", ""));
+                        SCHEME_REGISTRY_PATH_FORMAT.formatted(getScheme(), ref.getApiRegistry(this), location.replaceFirst("^/", ""));
             }
             LOG.debug("Location header: {}", location);
 
@@ -679,8 +682,8 @@ public final class Registry extends OCI<ContainerRef> {
         }
         String location = response.headers().get(Const.LOCATION_HEADER.toLowerCase());
         // Ensure location is absolute URI
-        if (!location.startsWith("http") && !location.startsWith("https")) {
-            location = "%s://%s/%s".formatted(getScheme(), ref.getApiRegistry(this), location.replaceFirst("^/", ""));
+        if (!location.startsWith("http") && !location.startsWith(HTTPS)) {
+            location = SCHEME_REGISTRY_PATH_FORMAT.formatted(getScheme(), ref.getApiRegistry(this), location.replaceFirst("^/", ""));
         }
         LOG.debug("Location header: {}", location);
 
@@ -736,9 +739,9 @@ public final class Registry extends OCI<ContainerRef> {
         if (response.statusCode() == 202) {
             String location = response.headers().get(Const.LOCATION_HEADER.toLowerCase());
             // Ensure location is absolute URI
-            if (!location.startsWith("http") && !location.startsWith("https")) {
+            if (!location.startsWith("http") && !location.startsWith(HTTPS)) {
                 location =
-                        "%s://%s/%s".formatted(getScheme(), ref.getApiRegistry(this), location.replaceFirst("^/", ""));
+                        SCHEME_REGISTRY_PATH_FORMAT.formatted(getScheme(), ref.getApiRegistry(this), location.replaceFirst("^/", ""));
             }
 
             URI uploadURI = createLocationWithDigest(location, digest);
@@ -1246,7 +1249,7 @@ public final class Registry extends OCI<ContainerRef> {
         public Builder from(Registry registry) {
             this.registry.setAuthProvider(registry.authProvider);
             this.registry.setInsecure(registry.insecure);
-            this.registry.setRegistry(registry.registry);
+            this.registry.setRegistry(registry.registryName);
             this.registry.setSkipTlsVerify(registry.skipTlsVerify);
             this.registry.setExecutorService(registry.executorService);
             this.registry.setParallelism(registry.maxConcurrentDownloads);

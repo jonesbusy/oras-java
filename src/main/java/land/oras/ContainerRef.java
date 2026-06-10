@@ -58,6 +58,8 @@ public final class ContainerRef extends Ref<ContainerRef> {
                     + "(?:@(.+))?" // digest
                     + "$");
 
+    private static final String DOCKER_IO = "docker.io";
+
     /**
      * The registry where the container is stored.
      */
@@ -129,9 +131,9 @@ public final class ContainerRef extends Ref<ContainerRef> {
      * @return The full repository name
      */
     public String getFullRepository(@Nullable Registry registry) {
-        String namespace = getNamespace(registry);
-        if (namespace != null) {
-            return "%s/%s".formatted(namespace, repository);
+        String resolvedNamespace = getNamespace(registry);
+        if (resolvedNamespace != null) {
+            return "%s/%s".formatted(resolvedNamespace, repository);
         }
         return repository;
     }
@@ -150,11 +152,11 @@ public final class ContainerRef extends Ref<ContainerRef> {
      * @return The API registry
      */
     public String getApiRegistry(@Nullable Registry target) {
-        String registry = target != null && target.getRegistry() != null ? target.getRegistry() : getRegistry();
-        if (registry.equals("docker.io")) {
+        String resolvedRegistry = target != null && target.getRegistry() != null ? target.getRegistry() : getRegistry();
+        if (resolvedRegistry.equals(DOCKER_IO)) {
             return "registry-1.docker.io";
         }
-        return registry;
+        return resolvedRegistry;
     }
 
     /**
@@ -170,8 +172,7 @@ public final class ContainerRef extends Ref<ContainerRef> {
      * @return The namespace
      */
     public @Nullable String getNamespace() {
-        String registry = getRegistry();
-        if (namespace == null && registry.equals("docker.io")) {
+        if (namespace == null && getRegistry().equals(DOCKER_IO)) {
             return "library";
         }
         return namespace;
@@ -186,7 +187,7 @@ public final class ContainerRef extends Ref<ContainerRef> {
         if (target == null || target.getRegistry() == null) {
             return getNamespace();
         }
-        if (namespace == null && target.getRegistry().equals("docker.io")) {
+        if (namespace == null && target.getRegistry().equals(DOCKER_IO)) {
             return "library";
         }
         return namespace;

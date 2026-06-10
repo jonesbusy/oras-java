@@ -320,6 +320,7 @@ public final class Manifest extends Descriptor implements Describable {
      * @param json The original JSON
      * @return The index
      */
+    @Override
     protected Manifest withJson(String json) {
         this.json = json;
         return this;

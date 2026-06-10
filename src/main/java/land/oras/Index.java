@@ -162,7 +162,7 @@ public final class Index extends Descriptor implements Describable {
      */
     public List<ManifestDescriptor> filter(Platform platform, BiPredicate<Platform, Platform> comparator) {
         return getManifests().stream()
-                .filter(descriptor -> comparator.test(descriptor.getPlatform(), platform))
+                .filter(manifestDescriptor -> comparator.test(manifestDescriptor.getPlatform(), platform))
                 .toList();
     }
 
@@ -172,7 +172,7 @@ public final class Index extends Descriptor implements Describable {
      */
     public List<ManifestDescriptor> unspecifiedPlatforms() {
         return getManifests().stream()
-                .filter(descriptor -> Platform.unspecified(descriptor.getPlatform()))
+                .filter(manifestDescriptor -> Platform.unspecified(manifestDescriptor.getPlatform()))
                 .toList();
     }
 
@@ -241,32 +241,32 @@ public final class Index extends Descriptor implements Describable {
      */
     public Index withNewManifests(ManifestDescriptor manifest) {
         List<ManifestDescriptor> newManifests = new LinkedList<>();
-        for (ManifestDescriptor descriptor : manifests) {
+        for (ManifestDescriptor existingDescriptor : manifests) {
 
             // Ignore same digest
-            if (descriptor.getDigest().equals(manifest.getDigest())) {
+            if (existingDescriptor.getDigest().equals(manifest.getDigest())) {
                 continue;
             }
 
             // Move previous ref
-            if (descriptor.getAnnotations() != null
-                    && descriptor.getAnnotations().containsKey(Const.ANNOTATION_REF)
+            if (existingDescriptor.getAnnotations() != null
+                    && existingDescriptor.getAnnotations().containsKey(Const.ANNOTATION_REF)
                     && manifest.getAnnotations() != null
                     && manifest.getAnnotations().containsKey(Const.ANNOTATION_REF)
-                    && descriptor
+                    && existingDescriptor
                             .getAnnotations()
                             .get(Const.ANNOTATION_REF)
                             .equals(manifest.getAnnotations().get(Const.ANNOTATION_REF))) {
-                Map<String, String> newAnnotations = new LinkedHashMap<>(descriptor.getAnnotations());
+                Map<String, String> newAnnotations = new LinkedHashMap<>(existingDescriptor.getAnnotations());
                 newAnnotations.remove(Const.ANNOTATION_REF);
                 if (newAnnotations.isEmpty()) {
                     newAnnotations = null;
                 }
                 newManifests.add(ManifestDescriptor.fromJson(
-                        descriptor.withAnnotations(newAnnotations).toJson()));
+                        existingDescriptor.withAnnotations(newAnnotations).toJson()));
                 continue;
             }
-            newManifests.add(ManifestDescriptor.fromJson(descriptor.toJson()));
+            newManifests.add(ManifestDescriptor.fromJson(existingDescriptor.toJson()));
         }
         newManifests.add(manifest);
         return new Index(
@@ -326,6 +326,7 @@ public final class Index extends Descriptor implements Describable {
      * @param json The original JSON
      * @return The index
      */
+    @Override
     protected Index withJson(String json) {
         this.json = json;
         return this;

@@ -254,8 +254,8 @@ public final class OCILayout extends OCI<LayoutRef> {
 
     @Override
     public Index getIndex(LayoutRef ref) {
-        Path path = getIndexPath();
-        return Index.fromPath(path);
+        Path indexPath = getIndexPath();
+        return Index.fromPath(indexPath);
     }
 
     @Override
