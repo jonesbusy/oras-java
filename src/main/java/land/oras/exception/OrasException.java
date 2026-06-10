@@ -42,12 +42,12 @@ public class OrasException extends RuntimeException {
     /**
      * Possible error response
      */
-    private @Nullable Error error;
+    private final @Nullable Error error;
 
     /**
      * Status code
      */
-    private @Nullable Integer statusCode;
+    private final @Nullable Integer statusCode;
 
     /**
      * Constructor
@@ -55,6 +55,8 @@ public class OrasException extends RuntimeException {
      */
     public OrasException(String message) {
         super(message);
+        this.error = null;
+        this.statusCode = null;
     }
 
     /**
@@ -62,19 +64,23 @@ public class OrasException extends RuntimeException {
      * @param response The response
      */
     public OrasException(HttpClient.ResponseWrapper<String> response) {
-        this("Response code: " + response.statusCode());
+        super("Response code: " + response.statusCode());
+        Error parsedError = null;
+        Integer parsedStatusCode = null;
         String contentType = response.headers().getOrDefault(Const.CONTENT_TYPE_HEADER, "");
         try {
-            this.statusCode = response.statusCode();
+            parsedStatusCode = response.statusCode();
             if (contentType.contains(Const.DEFAULT_JSON_MEDIA_TYPE)) {
-                this.error = JsonUtils.fromJson(response.response(), Error.class);
-                LOG.debug("Parsed error response: {}", error);
+                parsedError = JsonUtils.fromJson(response.response(), Error.class);
+                LOG.debug("Parsed error response: {}", parsedError);
             } else {
                 LOG.debug("Response content type is not JSON, cannot parse error response");
             }
         } catch (Exception e) {
             LOG.debug("Failed to parse error response", e);
         }
+        this.error = parsedError;
+        this.statusCode = parsedStatusCode;
     }
 
     /**
@@ -83,7 +89,8 @@ public class OrasException extends RuntimeException {
      * @param message The message
      */
     public OrasException(int statusCode, String message) {
-        this(message);
+        super(message);
+        this.error = null;
         this.statusCode = statusCode;
     }
 
@@ -94,6 +101,8 @@ public class OrasException extends RuntimeException {
      */
     public OrasException(String message, Throwable cause) {
         super(message, cause);
+        this.error = null;
+        this.statusCode = null;
     }
 
     /**
