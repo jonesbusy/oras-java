@@ -805,22 +805,34 @@ public final class HttpClient {
         }
 
         @Override
-        public void checkClientTrusted(X509Certificate[] chain, String authType) {}
+        public void checkClientTrusted(X509Certificate[] chain, String authType) {
+            // Intentionally empty: insecure trust manager that accepts all client certificates
+        }
 
         @Override
-        public void checkServerTrusted(X509Certificate[] chain, String authType) {}
+        public void checkServerTrusted(X509Certificate[] chain, String authType) {
+            // Intentionally empty: insecure trust manager that accepts all server certificates
+        }
 
         @Override
-        public void checkClientTrusted(X509Certificate[] chain, String authType, Socket socket) {}
+        public void checkClientTrusted(X509Certificate[] chain, String authType, Socket socket) {
+            // Intentionally empty: insecure trust manager that accepts all client certificates
+        }
 
         @Override
-        public void checkServerTrusted(X509Certificate[] chain, String authType, Socket socket) {}
+        public void checkServerTrusted(X509Certificate[] chain, String authType, Socket socket) {
+            // Intentionally empty: insecure trust manager that accepts all server certificates
+        }
 
         @Override
-        public void checkClientTrusted(X509Certificate[] chain, String authType, SSLEngine engine) {}
+        public void checkClientTrusted(X509Certificate[] chain, String authType, SSLEngine engine) {
+            // Intentionally empty: insecure trust manager that accepts all client certificates
+        }
 
         @Override
-        public void checkServerTrusted(X509Certificate[] chain, String authType, SSLEngine engine) {}
+        public void checkServerTrusted(X509Certificate[] chain, String authType, SSLEngine engine) {
+            // Intentionally empty: insecure trust manager that accepts all server certificates
+        }
     }
 
     /**
