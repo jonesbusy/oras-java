@@ -798,6 +798,7 @@ public final class HttpClient {
     /**
      * Insecure trust manager when skipping TLS verification
      */
+    @SuppressWarnings("java:S4830")
     private static class InsecureTrustManager extends X509ExtendedTrustManager {
         @Override
         public X509Certificate[] getAcceptedIssuers() {

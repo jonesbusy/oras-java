@@ -33,6 +33,9 @@ import org.jspecify.annotations.Nullable;
 @NullMarked
 public final class Scopes {
 
+    private static final String REPOSITORY_PREFIX = "repository:";
+    private static final String REGISTRY_PREFIX = "registry:";
+
     /**
      * List of scopes
      */
@@ -138,7 +141,7 @@ public final class Scopes {
      */
     public Scopes withOnlyGlobalScopes() {
         List<String> globalScopes = scopes.stream()
-                .filter(s -> !s.startsWith("repository:") && !s.startsWith("registry:"))
+                .filter(s -> !s.startsWith(REPOSITORY_PREFIX) && !s.startsWith(REGISTRY_PREFIX))
                 .sorted()
                 .distinct()
                 .toList();
@@ -151,7 +154,7 @@ public final class Scopes {
      */
     public Scopes withoutGlobalScopes() {
         List<String> nonGlobalScopes = scopes.stream()
-                .filter(s -> s.startsWith("repository:") || s.startsWith("registry:"))
+                .filter(s -> s.startsWith(REPOSITORY_PREFIX) || s.startsWith(REGISTRY_PREFIX))
                 .sorted()
                 .distinct()
                 .toList();
@@ -216,7 +219,7 @@ public final class Scopes {
      * @return True if these are global scopes, false otherwise
      */
     public boolean isGlobal() {
-        return scopes.stream().noneMatch(s -> s.startsWith("repository:") || s.startsWith("registry:"));
+        return scopes.stream().noneMatch(s -> s.startsWith(REPOSITORY_PREFIX) || s.startsWith(REGISTRY_PREFIX));
     }
 
     /**
@@ -224,7 +227,7 @@ public final class Scopes {
      * @return True if these scopes include global scopes, false otherwise
      */
     public boolean hasGlobalScopes() {
-        return scopes.stream().anyMatch(s -> !s.startsWith("repository:") && !s.startsWith("registry:"));
+        return scopes.stream().anyMatch(s -> !s.startsWith(REPOSITORY_PREFIX) && !s.startsWith(REGISTRY_PREFIX));
     }
 
     /**

@@ -32,7 +32,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.EnumSet;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -76,7 +78,15 @@ public final class ArchiveUtils {
      */
     public static Path createTempTar() {
         try {
-            return Files.createTempFile("oras", ".tar");
+            if (OsUtils.isPosixFileSystemSupported()) {
+                FileAttribute<Set<PosixFilePermission>> attr =
+                        PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"));
+                return Files.createTempFile("oras", ".tar", attr);
+            } else {
+                Path secureParent = Paths.get(System.getProperty("user.home"), ".oras-tmp");
+                Files.createDirectories(secureParent);
+                return Files.createTempFile(secureParent, "oras", ".tar");
+            }
         } catch (IOException e) {
             throw new OrasException("Failed to create temporary archive", e);
         }
@@ -88,7 +98,15 @@ public final class ArchiveUtils {
      */
     public static Path createTempZip() {
         try {
-            return Files.createTempFile("oras", ".zip");
+            if (OsUtils.isPosixFileSystemSupported()) {
+                FileAttribute<Set<PosixFilePermission>> attr =
+                        PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"));
+                return Files.createTempFile("oras", ".zip", attr);
+            } else {
+                Path secureParent = Paths.get(System.getProperty("user.home"), ".oras-tmp");
+                Files.createDirectories(secureParent);
+                return Files.createTempFile(secureParent, "oras", ".zip");
+            }
         } catch (IOException e) {
             throw new OrasException("Failed to create temporary zip file", e);
         }
@@ -100,7 +118,15 @@ public final class ArchiveUtils {
      */
     public static Path createTempDir() {
         try {
-            return Files.createTempDirectory("oras");
+            if (OsUtils.isPosixFileSystemSupported()) {
+                FileAttribute<Set<PosixFilePermission>> attr =
+                        PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------"));
+                return Files.createTempDirectory("oras", attr);
+            } else {
+                Path secureParent = Paths.get(System.getProperty("user.home"), ".oras-tmp");
+                Files.createDirectories(secureParent);
+                return Files.createTempDirectory(secureParent, "oras");
+            }
         } catch (IOException e) {
             throw new OrasException("Failed to create temporary directory", e);
         }
