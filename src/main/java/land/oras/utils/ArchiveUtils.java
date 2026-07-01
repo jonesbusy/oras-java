@@ -200,59 +200,7 @@ public final class ArchiveUtils {
                 paths.forEach(path -> {
                     LOG.trace("Visiting path: {}", path);
                     try {
-                        Path relativePath;
-                        if (includeDirectoryName) {
-                            Path baseName = isAbsolute ? sourceDir.getPath().getFileName() : sourceDir.getPath();
-                            relativePath = baseName.resolve(sourceDir.getPath().relativize(path));
-                        } else {
-                            relativePath = sourceDir.getPath().relativize(path);
-                        }
-                        if (relativePath.toString().isEmpty()) {
-                            LOG.trace("Skipping root directory: {}", path);
-                            return;
-                        }
-                        String entryName = relativePath.toString();
-
-                        TarArchiveEntry entry = null;
-                        BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class);
-
-                        if (Files.isSymbolicLink(path)) {
-                            LOG.trace("Adding symlink entry: {}", entryName);
-                            Path linkTarget = Files.readSymbolicLink(path);
-                            entry = new TarArchiveEntry(entryName, TarArchiveEntry.LF_SYMLINK);
-                            entry.setLinkName(linkTarget.toString());
-                            entry.setSize(0);
-                        } else {
-                            LOG.trace("Adding entry: {}", entryName);
-                            entry = new TarArchiveEntry(path.toFile(), entryName);
-                            entry.setSize(attrs.isRegularFile() ? Files.size(path) : 0);
-                        }
-
-                        // Get posix permissions
-                        int mode;
-                        if (OsUtils.isPosixFileSystemSupported()) {
-                            Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(path);
-                            mode = permissionsToMode(permissions);
-                            LOG.trace("Permissions: {}", permissions);
-                        } else {
-                            mode = Files.isDirectory(path) || Files.isExecutable(path) ? 0755 : 0644;
-                        }
-                        LOG.trace("Mode: {}", mode);
-
-                        // Set UID, GID, Uname, Gname to zero or empty
-                        entry.setUserId(0);
-                        entry.setGroupId(0);
-                        entry.setUserName("");
-                        entry.setGroupName("");
-                        entry.setMode(mode);
-                        taos.putArchiveEntry(entry);
-                        // If it's a regular file, write the file data
-                        if (attrs.isRegularFile() && !entry.isSymbolicLink()) {
-                            try (InputStream fis = Files.newInputStream(path)) {
-                                fis.transferTo(taos); // Write file contents to tar
-                            }
-                        }
-                        taos.closeArchiveEntry();
+                        processTarEntry(taos, sourceDir, path, includeDirectoryName, isAbsolute);
                     } catch (IOException e) {
                         throw new OrasException("Failed to create tar.gz file", e);
                     }
@@ -264,6 +212,75 @@ public final class ArchiveUtils {
             throw new OrasException("Failed to create tar.gz file", e);
         }
         return LocalPath.of(tarFile, Const.DEFAULT_BLOB_MEDIA_TYPE);
+    }
+
+    private static void processTarEntry(
+            TarArchiveOutputStream taos,
+            LocalPath sourceDir,
+            Path path,
+            boolean includeDirectoryName,
+            boolean isAbsolute)
+            throws IOException {
+        Path relativePath = resolveRelativePath(sourceDir, path, includeDirectoryName, isAbsolute);
+        if (relativePath.toString().isEmpty()) {
+            LOG.trace("Skipping root directory: {}", path);
+            return;
+        }
+        String entryName = relativePath.toString();
+        BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class);
+        TarArchiveEntry entry = createTarEntry(path, entryName, attrs);
+        int mode = resolveEntryMode(path);
+        LOG.trace("Mode: {}", mode);
+
+        // Set UID, GID, Uname, Gname to zero or empty
+        entry.setUserId(0);
+        entry.setGroupId(0);
+        entry.setUserName("");
+        entry.setGroupName("");
+        entry.setMode(mode);
+        taos.putArchiveEntry(entry);
+        // If it's a regular file, write the file data
+        if (attrs.isRegularFile() && !entry.isSymbolicLink()) {
+            try (InputStream fis = Files.newInputStream(path)) {
+                fis.transferTo(taos); // Write file contents to tar
+            }
+        }
+        taos.closeArchiveEntry();
+    }
+
+    private static Path resolveRelativePath(
+            LocalPath sourceDir, Path path, boolean includeDirectoryName, boolean isAbsolute) {
+        if (includeDirectoryName) {
+            Path baseName = isAbsolute ? sourceDir.getPath().getFileName() : sourceDir.getPath();
+            return baseName.resolve(sourceDir.getPath().relativize(path));
+        }
+        return sourceDir.getPath().relativize(path);
+    }
+
+    private static TarArchiveEntry createTarEntry(Path path, String entryName, BasicFileAttributes attrs)
+            throws IOException {
+        if (Files.isSymbolicLink(path)) {
+            LOG.trace("Adding symlink entry: {}", entryName);
+            Path linkTarget = Files.readSymbolicLink(path);
+            TarArchiveEntry entry = new TarArchiveEntry(entryName, TarArchiveEntry.LF_SYMLINK);
+            entry.setLinkName(linkTarget.toString());
+            entry.setSize(0);
+            return entry;
+        }
+        LOG.trace("Adding entry: {}", entryName);
+        TarArchiveEntry entry = new TarArchiveEntry(path.toFile(), entryName);
+        entry.setSize(attrs.isRegularFile() ? Files.size(path) : 0);
+        return entry;
+    }
+
+    private static int resolveEntryMode(Path path) throws IOException {
+        // Get posix permissions
+        if (OsUtils.isPosixFileSystemSupported()) {
+            Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(path);
+            LOG.trace("Permissions: {}", permissions);
+            return permissionsToMode(permissions);
+        }
+        return Files.isDirectory(path) || Files.isExecutable(path) ? 0755 : 0644;
     }
 
     /**
