@@ -695,30 +695,13 @@ public final class HttpClient {
         LOG.debug("Existing scopes: {}", scopes.getScopes());
         LOG.debug("New scopes: {}", newScopes.getScopes());
 
-        int maxAttempts = retryEnabled ? this.maxRetries : 1;
+        int maxAttempts = computeMaxAttempts(retryEnabled);
 
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             try {
                 HttpRequest.Builder builder = HttpRequest.newBuilder().uri(uri).method(method, bodyPublisher);
 
-                // Check token cache — may be populated by a prior attempt's 401 handling.
-                TokenResponse cachedToken = TokenCache.get(newScopes);
-                if (cachedToken == null) {
-                    LOG.trace("No token found in cache for scopes: {}", newScopes);
-                } else {
-                    LOG.trace("Found token in cache for scopes: {}", newScopes.withService(cachedToken.service()));
-                }
-
-                // Add authentication header if any (from provider or cached token)
-                var authHeader = authProvider.getAuthHeader(containerRef);
-                if (cachedToken == null
-                        && authHeader != null
-                        && !authProvider.getAuthScheme().equals(AuthScheme.NONE)
-                        && includeAuthHeader) {
-                    builder = builder.header(Const.AUTHORIZATION_HEADER, authHeader);
-                } else if (cachedToken != null && includeAuthHeader) {
-                    builder = builder.header(Const.AUTHORIZATION_HEADER, "Bearer " + cachedToken.getEffectiveToken());
-                }
+                builder = applyAuthHeaders(builder, newScopes, containerRef, authProvider, includeAuthHeader);
                 headers.forEach(builder::header);
 
                 // Add user agent
@@ -774,30 +757,65 @@ public final class HttpClient {
             } catch (OrasException e) {
                 throw e;
             } catch (Exception e) {
-                if (retryEnabled && attempt < maxAttempts - 1 && isRetryableException(e)) {
-                    long delay = computeRetryDelay(null, attempt);
-                    LOG.warn(
-                            "Retrying request ({}/{}) after {}ms, error={}",
-                            attempt + 1,
-                            maxAttempts - 1,
-                            delay,
-                            e.getMessage());
-                    meterRegistry
-                            .counter(Const.METRIC_HTTP_RETRIES, "reason", "network_error")
-                            .increment();
-                    try {
-                        Thread.sleep(delay);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        throw new OrasException("Request interrupted during retry wait", ie);
-                    }
-                } else {
-                    LOG.error("Failed to execute request", e);
-                    throw new OrasException("Unable to create HTTP request", e);
-                }
+                handleRetryableException(e, retryEnabled, attempt, maxAttempts);
             }
         }
         throw new OrasException("Max retries (" + (maxAttempts - 1) + ") exceeded");
+    }
+
+    private int computeMaxAttempts(boolean retryEnabled) {
+        return retryEnabled ? this.maxRetries : 1;
+    }
+
+    private HttpRequest.Builder applyAuthHeaders(
+            HttpRequest.Builder builder,
+            Scopes newScopes,
+            ContainerRef containerRef,
+            AuthProvider authProvider,
+            boolean includeAuthHeader) {
+        // Check token cache — may be populated by a prior attempt's 401 handling.
+        TokenResponse cachedToken = TokenCache.get(newScopes);
+        if (cachedToken == null) {
+            LOG.trace("No token found in cache for scopes: {}", newScopes);
+        } else {
+            LOG.trace("Found token in cache for scopes: {}", newScopes.withService(cachedToken.service()));
+        }
+
+        // Add authentication header if any (from provider or cached token)
+        var authHeader = authProvider.getAuthHeader(containerRef);
+        if (cachedToken == null
+                && authHeader != null
+                && !authProvider.getAuthScheme().equals(AuthScheme.NONE)
+                && includeAuthHeader) {
+            builder = builder.header(Const.AUTHORIZATION_HEADER, authHeader);
+        } else if (cachedToken != null && includeAuthHeader) {
+            builder = builder.header(Const.AUTHORIZATION_HEADER, "Bearer " + cachedToken.getEffectiveToken());
+        }
+        return builder;
+    }
+
+    private void handleRetryableException(Exception e, boolean retryEnabled, int attempt, int maxAttempts) {
+        if (retryEnabled && attempt < maxAttempts - 1 && isRetryableException(e)) {
+            long delay = computeRetryDelay(null, attempt);
+            LOG.warn(
+                    "Retrying request ({}/{}) after {}ms, error={}",
+                    attempt + 1,
+                    maxAttempts - 1,
+                    delay,
+                    e.getMessage());
+            meterRegistry
+                    .counter(Const.METRIC_HTTP_RETRIES, "reason", "network_error")
+                    .increment();
+            try {
+                Thread.sleep(delay);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new OrasException("Request interrupted during retry wait", ie);
+            }
+        } else {
+            LOG.error("Failed to execute request", e);
+            throw new OrasException("Unable to create HTTP request", e);
+        }
     }
 
     private static boolean isRetryableStatus(int statusCode) {
@@ -815,6 +833,7 @@ public final class HttpClient {
                 try {
                     return Long.parseLong(retryAfter.trim()) * 1000L;
                 } catch (NumberFormatException ignored) {
+                    // Non-numeric Retry-After value; fall through to exponential backoff
                 }
             }
         }

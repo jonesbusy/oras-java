@@ -105,6 +105,15 @@ final class ScopeUtils {
         Map<String, Map<String, Set<String>>> resourceTypes = new HashMap<>();
         List<String> result = new ArrayList<>();
 
+        parseScopes(scopes, resourceTypes, result);
+        buildScopeEntries(resourceTypes, result);
+
+        Collections.sort(result);
+        return result;
+    }
+
+    private static void parseScopes(
+            List<String> scopes, Map<String, Map<String, Set<String>>> resourceTypes, List<String> result) {
         for (String scope : scopes) {
             int firstColon = scope.indexOf(':');
             if (firstColon == -1) {
@@ -132,7 +141,10 @@ final class ScopeUtils {
                     .computeIfAbsent(resourceName, k -> new HashSet<>())
                     .addAll(actions);
         }
+    }
 
+    private static void buildScopeEntries(
+            Map<String, Map<String, Set<String>>> resourceTypes, List<String> result) {
         for (Map.Entry<String, Map<String, Set<String>>> resourceEntry : resourceTypes.entrySet()) {
             String resourceType = resourceEntry.getKey();
             for (Map.Entry<String, Set<String>> nameEntry :
@@ -151,9 +163,6 @@ final class ScopeUtils {
                 result.add(resourceType + ":" + resourceName + ":" + String.join(",", actions));
             }
         }
-
-        Collections.sort(result);
-        return result;
     }
 
     /**
