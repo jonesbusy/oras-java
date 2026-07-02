@@ -79,6 +79,11 @@ public final class HttpClient {
     private static final Logger LOG = LoggerFactory.getLogger(HttpClient.class);
 
     /**
+     * HTTP PATCH method name
+     */
+    private static final String PATCH = "PATCH";
+
+    /**
      * The pattern for the WWW-Authenticate header value
      */
     private static final Pattern WWW_AUTH_VALUE_PATTERN =
@@ -503,7 +508,7 @@ public final class HttpClient {
     public ResponseWrapper<String> patch(
             URI uri, byte[] body, Map<String, String> headers, Scopes scopes, AuthProvider authProvider) {
         return executeRequest(
-                "PATCH",
+                PATCH,
                 uri,
                 true,
                 headers,
@@ -533,7 +538,7 @@ public final class HttpClient {
             Scopes scopes,
             AuthProvider authProvider) {
         return executeRequest(
-                "PATCH",
+                PATCH,
                 uri,
                 true,
                 headers,
@@ -688,7 +693,7 @@ public final class HttpClient {
         Scopes newScopes =
                 switch (method) {
                     case "GET", "HEAD" -> scopes.withAddedRegistryScopes(Scope.PULL);
-                    case "POST", "PUT", "PATCH" -> scopes.withAddedRegistryScopes(Scope.PUSH);
+                    case "POST", "PUT", PATCH -> scopes.withAddedRegistryScopes(Scope.PUSH);
                     case "DELETE" -> scopes.withAddedRegistryScopes(Scope.DELETE);
                     default -> throw new OrasException("Unsupported HTTP method: " + method);
                 };
