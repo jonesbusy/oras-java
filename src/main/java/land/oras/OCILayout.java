@@ -180,6 +180,7 @@ public final class OCILayout extends OCI<LayoutRef> {
                 .orElseThrow(() -> new OrasException("Layer not found with title annotation"));
 
         Path blobPath = getBlobPath(layer);
+        verifyBlobDigest(blobPath);
 
         // Copy the blob to the target path
         try {
@@ -319,10 +320,32 @@ public final class OCILayout extends OCI<LayoutRef> {
     @Override
     public InputStream fetchBlob(LayoutRef ref) {
         Path blobPath = getBlobPath(ref);
+        verifyBlobDigest(blobPath);
         try {
             return Files.newInputStream(blobPath);
         } catch (IOException e) {
             throw new OrasException("Failed to fetch blob", e);
+        }
+    }
+
+    void verifyBlobDigest(Path blobPath) {
+        // A missing blob is left for the caller to surface (Files.newInputStream / Files.copy).
+        if (!Files.exists(blobPath)) {
+            return;
+        }
+        Path fileName = blobPath.getFileName();
+        Path parent = blobPath.getParent();
+        if (fileName == null || parent == null || parent.getFileName() == null) {
+            throw new OrasException("Cannot resolve expected digest for blob path: %s".formatted(blobPath));
+        }
+        String expectedDigest = "%s:%s".formatted(parent.getFileName(), fileName);
+        if (!SupportedAlgorithm.isSupported(expectedDigest)) {
+            throw new OrasException("Blob is not stored at a content-addressed path: %s".formatted(blobPath));
+        }
+        String actualDigest = SupportedAlgorithm.fromDigest(expectedDigest).digest(blobPath);
+        if (!expectedDigest.equals(actualDigest)) {
+            throw new OrasException("Blob integrity check failed for %s: expected %s but on-disk content hashes to %s"
+                    .formatted(blobPath, expectedDigest, actualDigest));
         }
     }
 

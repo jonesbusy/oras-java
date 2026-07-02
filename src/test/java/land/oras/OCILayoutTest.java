@@ -273,6 +273,131 @@ class OCILayoutTest {
     }
 
     @Test
+    void shouldRejectTamperedBlobOnRead() throws IOException {
+        Path path = layoutPath.resolve("tamperedBlob");
+        LayoutRef layoutRef = LayoutRef.parse("%s".formatted(path.toString()));
+        OCILayout ociLayout = OCILayout.Builder.builder().defaults(path).build();
+
+        // Push a known blob into the layout
+        Path blobFile = blobDir.resolve("blob.txt");
+        Files.writeString(blobFile, "hello");
+        String digest = SupportedAlgorithm.getDefault().digest(blobFile);
+        ociLayout.pushBlob(layoutRef.withDigest(digest), blobFile);
+
+        // Untampered blob reads back correctly
+        assertEquals("hello", new String(ociLayout.getBlob(layoutRef.withDigest(digest)), StandardCharsets.UTF_8));
+
+        // Tamper the blob on disk at its digest-derived path (simulating a co-tenant / shared FS)
+        String hex = digest.substring(digest.indexOf(':') + 1);
+        Path onDisk = path.resolve(Const.OCI_LAYOUT_BLOBS).resolve("sha256").resolve(hex);
+        Files.writeString(onDisk, "evil");
+
+        // The tampered content must be rejected rather than served as authentic
+        LayoutRef tamperedRef = layoutRef.withDigest(digest);
+        OrasException viaGetBlob = assertThrows(OrasException.class, () -> ociLayout.getBlob(tamperedRef));
+        assertTrue(
+                viaGetBlob.getMessage().contains("integrity check failed"),
+                "Unexpected message: " + viaGetBlob.getMessage());
+
+        // Every blob read path (getBlob, fetchBlob(ref), fetchBlob(ref, path)) is protected
+        assertThrows(OrasException.class, () -> ociLayout.fetchBlob(tamperedRef));
+        Path out = extractDir.resolve("out.bin");
+        assertThrows(OrasException.class, () -> ociLayout.fetchBlob(tamperedRef, out));
+    }
+
+    @Test
+    void shouldReadUntamperedBlobAfterIntegrityCheck() throws IOException {
+        Path path = layoutPath.resolve("untamperedBlob");
+        LayoutRef layoutRef = LayoutRef.parse("%s".formatted(path.toString()));
+        OCILayout ociLayout = OCILayout.Builder.builder().defaults(path).build();
+
+        Path blobFile = blobDir.resolve("intact.txt");
+        Files.writeString(blobFile, "intact-content");
+        String digest = SupportedAlgorithm.getDefault().digest(blobFile);
+        ociLayout.pushBlob(layoutRef.withDigest(digest), blobFile);
+
+        // The integrity check must not break a legitimate, untouched blob on any read path
+        LayoutRef ref = layoutRef.withDigest(digest);
+        assertEquals("intact-content", new String(ociLayout.getBlob(ref), StandardCharsets.UTF_8));
+        try (InputStream is = ociLayout.fetchBlob(ref)) {
+            assertEquals("intact-content", new String(is.readAllBytes(), StandardCharsets.UTF_8));
+        }
+        Path out = extractDir.resolve("intact-out.txt");
+        ociLayout.fetchBlob(ref, out);
+        assertEquals("intact-content", Files.readString(out));
+    }
+
+    @Test
+    void shouldRejectTamperedLayerOnPullArtifact() throws IOException {
+        Path ociLayoutPath = layoutPath.resolve("tamperedLayerPull");
+        Path artifactPath = blobDir.resolve("artifact.txt");
+        Files.writeString(artifactPath, "artifact-content");
+
+        LayoutRef layoutRef = LayoutRef.parse("%s:latest".formatted(ociLayoutPath.toString()));
+        OCILayout ociLayout =
+                OCILayout.Builder.builder().defaults(ociLayoutPath).build();
+        Annotations annotations = Annotations.ofManifest(Map.of(Const.ANNOTATION_CREATED, Const.currentTimestamp()));
+        ociLayout.pushArtifact(
+                layoutRef, ArtifactType.from("foo/bar"), annotations, LocalPath.of(artifactPath, "text/plain"));
+
+        // Tamper the layer blob on disk at its digest-derived path
+        String digest = SupportedAlgorithm.SHA256.digest(artifactPath);
+        String hex = digest.substring(digest.indexOf(':') + 1);
+        Path onDisk =
+                ociLayoutPath.resolve(Const.OCI_LAYOUT_BLOBS).resolve("sha256").resolve(hex);
+        Files.writeString(onDisk, "tampered-artifact");
+
+        Path target = extractDir.resolve("pull-target");
+        Files.createDirectories(target);
+        OrasException ex = assertThrows(OrasException.class, () -> ociLayout.pullArtifact(layoutRef, target, true));
+        assertTrue(ex.getMessage().contains("integrity check failed"), "Unexpected message: " + ex.getMessage());
+    }
+
+    @Test
+    void verifyBlobDigestRejectsNonContentAddressedPath() throws IOException {
+        Path ociLayoutPath = layoutPath.resolve("nonCasPath");
+        OCILayout ociLayout =
+                OCILayout.Builder.builder().defaults(ociLayoutPath).build();
+
+        // An existing file whose "<parentDir>:<fileName>" is not a valid digest ("notanalgo:somefile")
+        Path notContentAddressed = blobDir.resolve("notanalgo").resolve("somefile");
+        Files.createDirectories(notContentAddressed.getParent());
+        Files.writeString(notContentAddressed, "data");
+
+        OrasException ex = assertThrows(OrasException.class, () -> ociLayout.verifyBlobDigest(notContentAddressed));
+        assertTrue(
+                ex.getMessage().contains("not stored at a content-addressed path"),
+                "Unexpected message: " + ex.getMessage());
+    }
+
+    @Test
+    void verifyBlobDigestRejectsPathWithoutResolvableDigest() {
+        Path ociLayoutPath = layoutPath.resolve("noDigestPath");
+        OCILayout ociLayout =
+                OCILayout.Builder.builder().defaults(ociLayoutPath).build();
+
+        // The filesystem root exists but has no file name (and no parent), so no digest can be derived
+        Path root = layoutPath.getRoot();
+        assertNotNull(root);
+        assertNull(root.getFileName());
+        OrasException ex = assertThrows(OrasException.class, () -> ociLayout.verifyBlobDigest(root));
+        assertTrue(
+                ex.getMessage().contains("Cannot resolve expected digest"), "Unexpected message: " + ex.getMessage());
+    }
+
+    @Test
+    void verifyBlobDigestIgnoresMissingBlob() {
+        Path ociLayoutPath = layoutPath.resolve("missingBlob");
+        OCILayout ociLayout =
+                OCILayout.Builder.builder().defaults(ociLayoutPath).build();
+
+        // A missing blob is not the integrity check's concern: it returns without throwing and lets
+        // the caller (Files.newInputStream / Files.copy) surface the absence.
+        Path missing = blobDir.resolve("does-not-exist");
+        assertDoesNotThrow(() -> ociLayout.verifyBlobDigest(missing));
+    }
+
+    @Test
     void shouldPushIndexWithTag() {
         Path path = layoutPath.resolve("shouldPushIndexWithTag");
         LayoutRef layoutRef = LayoutRef.parse("%s".formatted(path.toString()));
