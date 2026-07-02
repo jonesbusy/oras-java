@@ -28,6 +28,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import land.oras.ContainerRef;
+import land.oras.exception.OrasException;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -586,5 +587,68 @@ class AuthStoreTest {
         assertNotNull(credential);
         assertEquals(user, credential.username());
         assertEquals(password, credential.password());
+    }
+
+    @Test
+    void shouldRejectCredentialHelperThatEscapesPrefix() throws Exception {
+        String maliciousSuffix = "../../../../../../tmp/pwn";
+        // language=json
+        String config =
+                """
+                {
+                    "auths": {},
+                    "credHelpers": { "evil.registry.com": "%s" }
+                }
+                """
+                        .formatted(maliciousSuffix);
+        Path configFile = tempDir.resolve("evil-helper-config.json");
+        Files.writeString(configFile, config);
+
+        AuthStore store = AuthStore.newStore(List.of(configFile));
+
+        ContainerRef ref = ContainerRef.parse("evil.registry.com/foo/bar:latest");
+        OrasException ex = assertThrows(OrasException.class, () -> store.getCredentialHelperBinary(ref));
+        assertTrue(ex.getMessage().contains("Invalid credential helper name"), "Unexpected: " + ex.getMessage());
+    }
+
+    @Test
+    void shouldReturnValidCredentialHelperBinary() throws Exception {
+        // language=json
+        String config =
+                """
+                {
+                    "auths": {},
+                    "credHelpers": { "good.registry.com": "ecr-login" }
+                }
+                """;
+        Path configFile = tempDir.resolve("good-helper-config.json");
+        Files.writeString(configFile, config);
+
+        AuthStore store = AuthStore.newStore(List.of(configFile));
+        String binary = store.getCredentialHelperBinary(ContainerRef.parse("good.registry.com/foo/bar:latest"));
+        assertEquals("docker-credential-ecr-login", binary);
+    }
+
+    @Test
+    void credentialHelperBinaryNameRejectsPrefixEscapes() {
+        // Several bad path
+        for (String bad : List.of(
+                "../../../../tmp/evil", "/bin/sh", "a/b", "a\\b", "..", "foo bar", "foo;rm -rf /", "foo$(id)", "")) {
+            OrasException ex = assertThrows(
+                    OrasException.class,
+                    () -> AuthStore.credentialHelperBinaryName(bad),
+                    "Expected rejection for: '" + bad + "'");
+            assertTrue(ex.getMessage().contains("Invalid credential helper name"), "Unexpected: " + ex.getMessage());
+        }
+    }
+
+    @Test
+    void credentialHelperBinaryNameAcceptsBareHelperNames() {
+        // Real-world helper names must keep working
+        assertEquals("docker-credential-osxkeychain", AuthStore.credentialHelperBinaryName("osxkeychain"));
+        assertEquals("docker-credential-ecr-login", AuthStore.credentialHelperBinaryName("ecr-login"));
+        assertEquals("docker-credential-secretservice", AuthStore.credentialHelperBinaryName("secretservice"));
+        assertEquals("docker-credential-pass", AuthStore.credentialHelperBinaryName("pass"));
+        assertEquals("docker-credential-wincred", AuthStore.credentialHelperBinaryName("wincred"));
     }
 }

@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 import land.oras.ContainerRef;
 import land.oras.OrasModel;
 import land.oras.exception.OrasException;
@@ -54,6 +55,23 @@ public class AuthStore {
      * Credentials helper for all registries
      */
     private static final String ALL_REGISTRIES_HELPER = "*";
+
+    /**
+     * Allowed characters for a credential-helper suffix
+     */
+    private static final Pattern VALID_HELPER_SUFFIX = Pattern.compile("^[A-Za-z0-9_-]+$");
+
+    /**
+     * Build the credential-helper binary name for a suffix
+     */
+    static String credentialHelperBinaryName(@Nullable String suffix) {
+        if (suffix == null || !VALID_HELPER_SUFFIX.matcher(suffix).matches()) {
+            throw new OrasException(
+                    "Invalid credential helper name '%s': only letters, digits, '_' and '-' are allowed (no path separators or '..')"
+                            .formatted(suffix));
+        }
+        return "docker-credential-" + suffix;
+    }
 
     /**
      * The internal config
@@ -139,7 +157,7 @@ public class AuthStore {
         if (helper == null) {
             return null;
         }
-        return "docker-credential-" + helper;
+        return credentialHelperBinaryName(helper);
     }
 
     /**
@@ -299,7 +317,7 @@ public class AuthStore {
 
             LOG.debug("Looking for credential helper 'docker-credential-{}' for hostname '{}'", suffix, hostname);
 
-            String binary = "docker-credential-" + suffix;
+            String binary = credentialHelperBinaryName(suffix);
             ProcessBuilder pb = new ProcessBuilder(binary, "get");
 
             try {
