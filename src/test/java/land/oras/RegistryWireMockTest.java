@@ -21,6 +21,7 @@
 package land.oras;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -1435,8 +1436,10 @@ class RegistryWireMockTest {
         // A malicious source serves an unbounded chain of nested indexes
         int levels = 40;
         String[] digests = new String[levels + 2];
-        for (int i = 0; i < digests.length; i++) {
-            digests[i] = SupportedAlgorithm.SHA256.digest(("deep-chain-" + i).getBytes(StandardCharsets.UTF_8));
+        digests[levels + 1] = SupportedAlgorithm.SHA256.digest("deep-chain-leaf".getBytes(StandardCharsets.UTF_8));
+        for (int i = levels; i >= 0; i--) {
+            digests[i] = SupportedAlgorithm.SHA256.digest(
+                    nestedIndexJson(digests[i + 1]).getBytes(StandardCharsets.UTF_8));
         }
 
         // Deeper levels
@@ -1553,5 +1556,129 @@ class RegistryWireMockTest {
                         .withHeader(Const.CONTENT_TYPE_HEADER, Const.DEFAULT_INDEX_MEDIA_TYPE)
                         .withHeader(Const.DOCKER_CONTENT_DIGEST_HEADER, selfDigest)
                         .withBody(nestedIndexJson(childDigest))));
+    }
+
+    @Test
+    void shouldRejectBlobWhenContentDoesNotMatchPinnedDigest(WireMockRuntimeInfo wmRuntimeInfo) {
+        String pinnedDigest = SupportedAlgorithm.SHA256.digest("good-data".getBytes(StandardCharsets.UTF_8));
+        String evil = "evil-data";
+        String selfConsistentHeader = SupportedAlgorithm.SHA256.digest(evil.getBytes(StandardCharsets.UTF_8));
+
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        wireMock.register(WireMock.get(WireMock.urlEqualTo("/v2/library/evil-blob/blobs/%s".formatted(pinnedDigest)))
+                .willReturn(WireMock.ok()
+                        .withBody(evil)
+                        .withHeader(Const.DOCKER_CONTENT_DIGEST_HEADER, selfConsistentHeader)));
+
+        Registry registry = Registry.Builder.builder()
+                .withAuthProvider(authProvider)
+                .withInsecure(true)
+                .build();
+        ContainerRef ref = ContainerRef.parse("localhost:%d/library/evil-blob".formatted(wmRuntimeInfo.getHttpPort()))
+                .withDigest(pinnedDigest);
+
+        OrasException ex = assertThrows(OrasException.class, () -> registry.getBlob(ref));
+        assertTrue(ex.getMessage().contains("Digest mismatch"), "Unexpected: " + ex.getMessage());
+    }
+
+    @Test
+    void shouldReturnBinaryBlobWithoutCorruption(WireMockRuntimeInfo wmRuntimeInfo) {
+        byte[] binary = new byte[] {0x00, (byte) 0xC3, 0x28, (byte) 0xFF, (byte) 0x80, 0x7F, (byte) 0xFE};
+        String digest = SupportedAlgorithm.SHA256.digest(binary);
+
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        wireMock.register(WireMock.get(WireMock.urlEqualTo("/v2/library/bin-blob/blobs/%s".formatted(digest)))
+                .willReturn(WireMock.ok().withBody(binary).withHeader(Const.DOCKER_CONTENT_DIGEST_HEADER, digest)));
+
+        Registry registry = Registry.Builder.builder()
+                .withAuthProvider(authProvider)
+                .withInsecure(true)
+                .build();
+        ContainerRef ref = ContainerRef.parse("localhost:%d/library/bin-blob".formatted(wmRuntimeInfo.getHttpPort()))
+                .withDigest(digest);
+
+        assertArrayEquals(binary, registry.getBlob(ref));
+    }
+
+    @Test
+    void shouldRejectFetchBlobToPathOnDigestMismatch(WireMockRuntimeInfo wmRuntimeInfo) {
+        String pinnedDigest = SupportedAlgorithm.SHA256.digest("good".getBytes(StandardCharsets.UTF_8));
+
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        wireMock.register(WireMock.get(WireMock.urlEqualTo("/v2/library/evil-file/blobs/%s".formatted(pinnedDigest)))
+                .willReturn(WireMock.ok().withBody("tampered")));
+
+        Registry registry = Registry.Builder.builder()
+                .withAuthProvider(authProvider)
+                .withInsecure(true)
+                .build();
+        ContainerRef ref = ContainerRef.parse("localhost:%d/library/evil-file".formatted(wmRuntimeInfo.getHttpPort()))
+                .withDigest(pinnedDigest);
+        Path out = configDir.resolve("blob-out.bin");
+
+        OrasException ex = assertThrows(OrasException.class, () -> registry.fetchBlob(ref, out));
+        assertTrue(ex.getMessage().contains("Digest mismatch"), "Unexpected: " + ex.getMessage());
+    }
+
+    @Test
+    void shouldRejectBlobStreamOnDigestMismatch(WireMockRuntimeInfo wmRuntimeInfo) {
+        String pinnedDigest = SupportedAlgorithm.SHA256.digest("good".getBytes(StandardCharsets.UTF_8));
+
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        wireMock.register(WireMock.get(WireMock.urlEqualTo("/v2/library/evil-stream/blobs/%s".formatted(pinnedDigest)))
+                .willReturn(WireMock.ok().withBody("tampered")));
+
+        Registry registry = Registry.Builder.builder()
+                .withAuthProvider(authProvider)
+                .withInsecure(true)
+                .build();
+        ContainerRef ref = ContainerRef.parse("localhost:%d/library/evil-stream".formatted(wmRuntimeInfo.getHttpPort()))
+                .withDigest(pinnedDigest);
+
+        // The digest is verified incrementally, so the mismatch surfaces when the stream is read to EOF.
+        OrasException ex = assertThrows(OrasException.class, () -> {
+            try (InputStream is = registry.getBlobStream(ref)) {
+                is.readAllBytes();
+            }
+        });
+        assertTrue(ex.getMessage().contains("Digest mismatch"), "Unexpected: " + ex.getMessage());
+    }
+
+    @Test
+    void shouldRejectManifestWhoseContentDoesNotMatchPinnedDigest(WireMockRuntimeInfo wmRuntimeInfo) {
+        String realManifest =
+                """
+                {"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json",\
+                "config":{"mediaType":"application/vnd.oci.empty.v1+json",\
+                "digest":"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","size":2},\
+                "layers":[]}""";
+        String evilManifest = realManifest.replace("\"layers\":[]", "\"layers\":[],\"annotations\":{\"x\":\"y\"}");
+        String pinnedDigest = SupportedAlgorithm.SHA256.digest(realManifest.getBytes(StandardCharsets.UTF_8));
+        String selfConsistentHeader = SupportedAlgorithm.SHA256.digest(evilManifest.getBytes(StandardCharsets.UTF_8));
+
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        String manifestPath = "/v2/library/evil-manifest/manifests/%s".formatted(pinnedDigest);
+        wireMock.register(WireMock.head(WireMock.urlEqualTo(manifestPath))
+                .willReturn(WireMock.aResponse()
+                        .withStatus(200)
+                        .withHeader(Const.CONTENT_TYPE_HEADER, Const.DEFAULT_MANIFEST_MEDIA_TYPE)
+                        .withHeader(Const.DOCKER_CONTENT_DIGEST_HEADER, selfConsistentHeader)));
+        wireMock.register(WireMock.get(WireMock.urlEqualTo(manifestPath))
+                .willReturn(WireMock.aResponse()
+                        .withStatus(200)
+                        .withHeader(Const.CONTENT_TYPE_HEADER, Const.DEFAULT_MANIFEST_MEDIA_TYPE)
+                        .withHeader(Const.DOCKER_CONTENT_DIGEST_HEADER, selfConsistentHeader)
+                        .withBody(evilManifest)));
+
+        Registry registry = Registry.Builder.builder()
+                .withAuthProvider(authProvider)
+                .withInsecure(true)
+                .build();
+        ContainerRef ref = ContainerRef.parse(
+                        "localhost:%d/library/evil-manifest".formatted(wmRuntimeInfo.getHttpPort()))
+                .withDigest(pinnedDigest);
+
+        OrasException ex = assertThrows(OrasException.class, () -> registry.getManifest(ref));
+        assertTrue(ex.getMessage().contains("Digest mismatch"), "Unexpected: " + ex.getMessage());
     }
 }

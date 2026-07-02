@@ -22,6 +22,7 @@ package land.oras;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -31,8 +32,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -1160,24 +1163,11 @@ public final class Registry extends OCI<ContainerRef> {
     }
 
     private byte[] getBlobDirect(ContainerRef containerRef) {
-        ContainerRef ref = containerRef.forRegistry(this).checkBlocked(this);
-        if (ref.isInsecure(this) && !this.isInsecure()) {
-            return copyForNewTransport(ref.getRegistry(), true).getBlobDirect(ref);
+        try (InputStream is = fetchBlobDirect(containerRef)) {
+            return is.readAllBytes();
+        } catch (IOException e) {
+            throw new OrasException("Failed to get blob", e);
         }
-        if (!ref.isInsecure(this) && this.isInsecure()) {
-            return copyForNewTransport(ref.getRegistry(), false).getBlobDirect(ref);
-        }
-        URI uri = URI.create("%s://%s".formatted(getScheme(), ref.getBlobsPath(this)));
-        HttpClient.ResponseWrapper<String> response = client.get(
-                uri,
-                Map.of(Const.ACCEPT_HEADER, Const.APPLICATION_OCTET_STREAM_HEADER_VALUE),
-                Scopes.of(ref),
-                authProvider);
-        logResponse(response);
-        handleError(response);
-        byte[] data = response.response().getBytes(StandardCharsets.UTF_8);
-        validateDockerContentDigest(response, data);
-        return data;
     }
 
     @Override
@@ -1207,7 +1197,7 @@ public final class Registry extends OCI<ContainerRef> {
                 authProvider);
         logResponse(response);
         handleError(response);
-        validateDockerContentDigest(response, path);
+        verifyBlobDigest(ref, path, response.headers());
     }
 
     @Override
@@ -1231,8 +1221,30 @@ public final class Registry extends OCI<ContainerRef> {
                 authProvider);
         logResponse(response);
         handleError(response);
-        validateDockerContentDigest(response);
-        return response.response();
+        // Verify the content digest incrementally
+        List<String> expected = expectedBlobDigests(ref, response.headers());
+        if (expected.isEmpty()) {
+            return response.response();
+        }
+        return new DigestVerifyingInputStream(response.response(), expected);
+    }
+
+    /**
+     * Collect the digests a downloaded blob must match: the caller-pinned digest (when it is a supported
+     * digest and not a plain tag) and the server-advertised {@code Docker-Content-Digest} header (when
+     * present). Duplicates are collapsed so the content is hashed once per distinct algorithm.
+     */
+    private static List<String> expectedBlobDigests(ContainerRef ref, Map<String, String> headers) {
+        List<String> expected = new ArrayList<>(2);
+        String pinned = ref.getDigest();
+        if (pinned != null && SupportedAlgorithm.isSupported(pinned)) {
+            expected.add(pinned);
+        }
+        String header = headers.get(Const.DOCKER_CONTENT_DIGEST_HEADER.toLowerCase());
+        if (header != null && !expected.contains(header)) {
+            expected.add(header);
+        }
+        return expected;
     }
 
     @Override
@@ -1304,16 +1316,16 @@ public final class Registry extends OCI<ContainerRef> {
         HttpClient.ResponseWrapper<String> response = getManifestResponse(containerRef);
         logResponse(response);
         handleError(response);
+        String json = response.response();
+        // When the reference is pinned to a digest, verify the returned manifest/index bytes against it
+        verifyPinnedDigest(containerRef, json.getBytes(StandardCharsets.UTF_8));
         String size = response.headers().get(Const.CONTENT_LENGTH_HEADER.toLowerCase());
         String contentType = response.headers().get(Const.CONTENT_TYPE_HEADER.toLowerCase());
         return Descriptor.of(
                         validateDockerContentDigest(response),
-                        Long.parseLong(
-                                size == null
-                                        ? String.valueOf(response.response().length())
-                                        : size),
+                        Long.parseLong(size == null ? String.valueOf(json.length()) : size),
                         contentType)
-                .withJson(response.response());
+                .withJson(json);
     }
 
     @Override
@@ -1407,30 +1419,37 @@ public final class Registry extends OCI<ContainerRef> {
         return client.get(uri, Map.of("Accept", Const.MANIFEST_ACCEPT_TYPE), Scopes.of(ref), authProvider);
     }
 
-    private void validateDockerContentDigest(HttpClient.ResponseWrapper<String> response, byte[] data) {
-        String digest = response.headers().get(Const.DOCKER_CONTENT_DIGEST_HEADER.toLowerCase());
-        // This might happen when blob are hosted other storage.
-        // We need a way to propagate the headers like scoped.
-        // For now just skip validation
-        if (digest == null) {
-            LOG.debug("Docker-Content-Digest header not found in response. Skipping validation.");
+    /**
+     * Verify in-memory content against the digest pinned in the reference. No-op when the reference is
+     * not digest-pinned (e.g. pulled by tag), since there is then no trusted value to check against.
+     * @param ref The reference the content was requested for
+     * @param content The bytes returned by the registry
+     */
+    private void verifyPinnedDigest(ContainerRef ref, byte[] content) {
+        String digest = ref.getDigest();
+        if (digest == null || !SupportedAlgorithm.isSupported(digest)) {
             return;
         }
-        String computedDigest = SupportedAlgorithm.fromDigest(digest).digest(data);
-        ensureDigest(digest, computedDigest);
+        ensureDigest(digest, SupportedAlgorithm.fromDigest(digest).digest(content));
     }
 
-    private void validateDockerContentDigest(HttpClient.ResponseWrapper<Path> response, Path path) {
-        String digest = response.headers().get(Const.DOCKER_CONTENT_DIGEST_HEADER.toLowerCase());
-        // This might happen when blob are hosted other storage.
-        // We need a way to propagate the headers like scoped.
-        // For now just skip validation
-        if (digest == null) {
-            LOG.debug("Docker-Content-Digest header not found in response. Skipping validation.");
-            return;
+    /**
+     * Verify a downloaded blob against every digest that applies (pinned or from header)
+     * @param ref The reference the blob was requested for
+     * @param content The path the registry response was written to
+     * @param headers The response headers
+     */
+    private void verifyBlobDigest(ContainerRef ref, Path content, Map<String, String> headers) {
+        String pinned = ref.getDigest();
+        String verified = null;
+        if (pinned != null && SupportedAlgorithm.isSupported(pinned)) {
+            ensureDigest(pinned, SupportedAlgorithm.fromDigest(pinned).digest(content));
+            verified = pinned;
         }
-        String computedDigest = SupportedAlgorithm.fromDigest(digest).digest(path);
-        ensureDigest(digest, computedDigest);
+        String header = headers.get(Const.DOCKER_CONTENT_DIGEST_HEADER.toLowerCase());
+        if (header != null && !header.equals(verified)) {
+            ensureDigest(header, SupportedAlgorithm.fromDigest(header).digest(content));
+        }
     }
 
     private @Nullable String validateDockerContentDigest(HttpClient.ResponseWrapper<?> response) {
@@ -1439,9 +1458,7 @@ public final class Registry extends OCI<ContainerRef> {
 
     private @Nullable String validateDockerContentDigest(Map<String, String> headers) {
         String digest = headers.get(Const.DOCKER_CONTENT_DIGEST_HEADER.toLowerCase());
-        // This might happen when blob are hosted other storage.
-        // We need a way to propagate the headers like scoped.
-        // For now just skip validation
+        // Not mandatory, but require validation if present
         if (digest == null) {
             LOG.debug("Docker-Content-Digest header not found in response. Skipping validation.");
             return null;
@@ -1999,6 +2016,63 @@ public final class Registry extends OCI<ContainerRef> {
          */
         public Registry build() {
             return registry.build();
+        }
+    }
+
+    /**
+     * A stream that verifies the content digest incrementally as it is read, without buffering to a
+     * temporary file. It updates one {@link MessageDigest} per distinct algorithm as bytes pass through
+     * and, at end-of-stream
+     */
+    private static final class DigestVerifyingInputStream extends FilterInputStream {
+
+        private final List<String> expectedDigests;
+        private final Map<String, MessageDigest> digestsByPrefix = new HashMap<>();
+        private boolean verified;
+
+        private DigestVerifyingInputStream(InputStream in, List<String> expectedDigests) {
+            super(in);
+            this.expectedDigests = expectedDigests;
+            for (String expected : expectedDigests) {
+                SupportedAlgorithm algorithm = SupportedAlgorithm.fromDigest(expected);
+                digestsByPrefix.computeIfAbsent(algorithm.getPrefix(), p -> {
+                    try {
+                        return MessageDigest.getInstance(algorithm.getAlgorithmName());
+                    } catch (NoSuchAlgorithmException e) {
+                        throw new OrasException("Unsupported digest algorithm: " + algorithm.getAlgorithmName(), e);
+                    }
+                });
+            }
+        }
+
+        @Override
+        public int read(byte[] buffer, int off, int len) throws IOException {
+            int read = super.read(buffer, off, len);
+            if (read > 0) {
+                for (MessageDigest digest : digestsByPrefix.values()) {
+                    digest.update(buffer, off, read);
+                }
+            } else if (read < 0) {
+                verify();
+            }
+            return read;
+        }
+
+        private void verify() {
+            if (verified) {
+                return;
+            }
+            verified = true;
+            Map<String, String> actualByPrefix = new HashMap<>();
+            digestsByPrefix.forEach((prefix, digest) ->
+                    actualByPrefix.put(prefix, prefix + ":" + HexFormat.of().formatHex(digest.digest())));
+            for (String expected : expectedDigests) {
+                String prefix = SupportedAlgorithm.fromDigest(expected).getPrefix();
+                String actual = actualByPrefix.get(prefix);
+                if (!expected.equals(actual)) {
+                    throw new OrasException("Digest mismatch: %s != %s".formatted(expected, actual));
+                }
+            }
         }
     }
 }
