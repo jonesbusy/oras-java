@@ -149,6 +149,16 @@ public final class Registry extends OCI<ContainerRef> {
     private long maxRetryDelayMs = 30_000L;
 
     /**
+     * Maximum number of pages to fetch during tag listing (0 = unlimited).
+     */
+    private int tagListMaxPages = 100;
+
+    /**
+     * Maximum number of pages to fetch during referrer listing (0 = unlimited).
+     */
+    private int referrerListMaxPages = 100;
+
+    /**
      * The containers policy for trust verification
      */
     private ContainersPolicy containersPolicy;
@@ -362,6 +372,14 @@ public final class Registry extends OCI<ContainerRef> {
         this.maxRetryDelayMs = maxRetryDelayMs;
     }
 
+    private void setTagListMaxPages(int tagListMaxPages) {
+        this.tagListMaxPages = tagListMaxPages;
+    }
+
+    private void setReferrerListMaxPages(int referrerListMaxPages) {
+        this.referrerListMaxPages = referrerListMaxPages;
+    }
+
     private void setContainersPolicy(ContainersPolicy containersPolicy) {
         this.containersPolicy = containersPolicy;
     }
@@ -517,8 +535,25 @@ public final class Registry extends OCI<ContainerRef> {
                 uri, Map.of(Const.ACCEPT_HEADER, Const.DEFAULT_JSON_MEDIA_TYPE), Scopes.of(ref), authProvider);
         logResponse(response);
         handleError(response);
-        return JsonUtils.fromJson(response.response(), Tags.class)
+        Tags page = JsonUtils.fromJson(response.response(), Tags.class)
                 .withLast(getLastFromLink(response).orElse(null));
+        if (page.last() == null) {
+            return page;
+        }
+        // Follow pagination links, accumulating all tags, guarded against unbounded loops.
+        List<String> allTags = new ArrayList<>(page.tags());
+        String last = page.last();
+        for (int pageNum = 1; last != null; pageNum++) {
+            if (tagListMaxPages > 0 && pageNum >= tagListMaxPages) {
+                throw new OrasException(
+                        "Tag listing exceeded %d pages: possible self-referential Link header from a rogue registry"
+                                .formatted(tagListMaxPages));
+            }
+            Tags nextPage = getTags(ref, Integer.MAX_VALUE, last);
+            allTags.addAll(nextPage.tags());
+            last = nextPage.last();
+        }
+        return new Tags(page.name(), allTags);
     }
 
     @Override
@@ -579,7 +614,29 @@ public final class Registry extends OCI<ContainerRef> {
                 uri, Map.of(Const.ACCEPT_HEADER, Const.DEFAULT_INDEX_MEDIA_TYPE), Scopes.of(ref), authProvider);
         logResponse(response);
         handleError(response);
-        return JsonUtils.fromJson(response.response(), Referrers.class);
+        Referrers page = JsonUtils.fromJson(response.response(), Referrers.class);
+        String last = getLastFromLink(response).orElse(null);
+        if (last == null) {
+            return page;
+        }
+        // Follow pagination links, accumulating all referrers, guarded against unbounded loops.
+        List<ManifestDescriptor> allManifests = new ArrayList<>(page.getManifests());
+        for (int pageNum = 1; last != null; pageNum++) {
+            if (referrerListMaxPages > 0 && pageNum >= referrerListMaxPages) {
+                throw new OrasException(
+                        "Referrer listing exceeded %d pages: possible self-referential Link header from a rogue registry"
+                                .formatted(referrerListMaxPages));
+            }
+            URI nextUri = URI.create("%s://%s".formatted(getScheme(), ref.getReferrersPath(this, artifactType, last)));
+            HttpClient.ResponseWrapper<String> nextResponse = client.get(
+                    nextUri, Map.of(Const.ACCEPT_HEADER, Const.DEFAULT_INDEX_MEDIA_TYPE), Scopes.of(ref), authProvider);
+            logResponse(nextResponse);
+            handleError(nextResponse);
+            Referrers nextPage = JsonUtils.fromJson(nextResponse.response(), Referrers.class);
+            allManifests.addAll(nextPage.getManifests());
+            last = getLastFromLink(nextResponse).orElse(null);
+        }
+        return Referrers.from(allManifests);
     }
 
     /**
@@ -1743,6 +1800,8 @@ public final class Registry extends OCI<ContainerRef> {
             this.registry.setMaxRetries(registry.maxRetries);
             this.registry.setRetryDelayMs(registry.retryDelayMs);
             this.registry.setMaxRetryDelayMs(registry.maxRetryDelayMs);
+            this.registry.setTagListMaxPages(registry.tagListMaxPages);
+            this.registry.setReferrerListMaxPages(registry.referrerListMaxPages);
             this.registry.setContainersPolicy(registry.containersPolicy);
             if (registry.meterRegistry != null) {
                 this.registry.setMeterRegistry(registry.meterRegistry);
@@ -1964,6 +2023,28 @@ public final class Registry extends OCI<ContainerRef> {
          */
         public Builder withMaxRetryDelay(long maxRetryDelayMs) {
             registry.setMaxRetryDelayMs(maxRetryDelayMs);
+            return this;
+        }
+
+        /**
+         * Set the maximum number of pages fetched during a full tag listing (0 = unlimited, not recommanded).
+         *
+         * @param tagListMaxPages maximum number of pages (0 means unlimited)
+         * @return The builder
+         */
+        public Builder withTagListMaxPages(int tagListMaxPages) {
+            registry.setTagListMaxPages(tagListMaxPages);
+            return this;
+        }
+
+        /**
+         * Set the maximum number of pages fetched during a full referrer listing (0 = unlimited).
+         *
+         * @param referrerListMaxPages maximum number of pages (0 means unlimited)
+         * @return The builder
+         */
+        public Builder withReferrerListMaxPages(int referrerListMaxPages) {
+            registry.setReferrerListMaxPages(referrerListMaxPages);
             return this;
         }
 

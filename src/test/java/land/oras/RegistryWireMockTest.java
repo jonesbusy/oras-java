@@ -1681,4 +1681,88 @@ class RegistryWireMockTest {
         OrasException ex = assertThrows(OrasException.class, () -> registry.getManifest(ref));
         assertTrue(ex.getMessage().contains("Digest mismatch"), "Unexpected: " + ex.getMessage());
     }
+
+    @Test
+    void shouldFailOnTagListPaginationExceedingMaxPages(WireMockRuntimeInfo wmRuntimeInfo) {
+
+        // Returns one tag and a Link header pointing back to the same URL (self-referential)
+        String page1 = JsonUtils.toJson(new Tags("artifact-text", List.of("v1.0")));
+
+        // Returns a different tag but still loops
+        String page2 = JsonUtils.toJson(new Tags("artifact-text", List.of("v2.0")));
+
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        wireMock.register(WireMock.get(WireMock.urlPathEqualTo("/v2/library/artifact-text/tags/list"))
+                .withQueryParam("last", WireMock.absent())
+                .willReturn(WireMock.okJson(page1)
+                        .withHeader("Link", "</v2/library/artifact-text/tags/list?last=v1.0>; rel=\"next\"")));
+        wireMock.register(WireMock.get(WireMock.urlPathEqualTo("/v2/library/artifact-text/tags/list"))
+                .withQueryParam("last", WireMock.matching(".+"))
+                .willReturn(WireMock.okJson(page2)
+                        .withHeader("Link", "</v2/library/artifact-text/tags/list?last=v2.0>; rel=\"next\"")));
+
+        Registry registry = Registry.Builder.builder()
+                .withAuthProvider(authProvider)
+                .withInsecure(true)
+                .withTagListMaxPages(2)
+                .build();
+
+        OrasException exception = assertThrows(
+                OrasException.class,
+                () -> registry.getTags(ContainerRef.parse("%s/library/artifact-text"
+                        .formatted(wmRuntimeInfo.getHttpBaseUrl().replace("http://", "")))));
+        assertTrue(
+                exception.getMessage().contains("Tag listing exceeded 2 pages"),
+                "Unexpected message: " + exception.getMessage());
+    }
+
+    @Test
+    void shouldFailOnReferrerListPaginationExceedingMaxPages(WireMockRuntimeInfo wmRuntimeInfo) {
+
+        String digest = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+        String referrersPath = "/v2/library/artifact-text/referrers/" + digest;
+
+        // Minimal referrers index JSON with one manifest entry per page
+        String page1 =
+                """
+                {"mediaType":"application/vnd.oci.image.index.v1+json","manifests":\
+                [{"mediaType":"application/vnd.oci.image.manifest.v1+json",\
+                "digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1}]}""";
+        String page2 =
+                """
+                {"mediaType":"application/vnd.oci.image.index.v1+json","manifests":\
+                [{"mediaType":"application/vnd.oci.image.manifest.v1+json",\
+                "digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":1}]}""";
+
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        wireMock.register(WireMock.get(WireMock.urlPathEqualTo(referrersPath))
+                .withQueryParam("last", WireMock.absent())
+                .willReturn(WireMock.aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/vnd.oci.image.index.v1+json")
+                        .withHeader("Link", "<" + referrersPath + "?last=sha256:aaaa>; rel=\"next\"")
+                        .withBody(page1)));
+        wireMock.register(WireMock.get(WireMock.urlPathEqualTo(referrersPath))
+                .withQueryParam("last", WireMock.matching(".+"))
+                .willReturn(WireMock.aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/vnd.oci.image.index.v1+json")
+                        .withHeader("Link", "<" + referrersPath + "?last=sha256:bbbb>; rel=\"next\"")
+                        .withBody(page2)));
+
+        Registry registry = Registry.Builder.builder()
+                .withAuthProvider(authProvider)
+                .withInsecure(true)
+                .withReferrerListMaxPages(2)
+                .build();
+
+        ContainerRef ref = ContainerRef.parse("%s/library/artifact-text"
+                        .formatted(wmRuntimeInfo.getHttpBaseUrl().replace("http://", "")))
+                .withDigest(digest);
+
+        OrasException exception = assertThrows(OrasException.class, () -> registry.getReferrers(ref, null));
+        assertTrue(
+                exception.getMessage().contains("Referrer listing exceeded 2 pages"),
+                "Unexpected message: " + exception.getMessage());
+    }
 }

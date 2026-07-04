@@ -359,6 +359,27 @@ public final class ContainerRef extends Ref<ContainerRef> {
     }
 
     /**
+     * Return the referrers URL for this container referrer with a pagination cursor
+     * @param registry The optional registry
+     * @param artifactType The optional artifact type filter
+     * @param last The pagination cursor (the last digest seen), or null to start from the beginning
+     * @return The referrers URL with query parameters
+     */
+    public String getReferrersPath(
+            @Nullable Registry registry, @Nullable ArtifactType artifactType, @Nullable String last) {
+        if (last == null) {
+            return getReferrersPath(registry, artifactType);
+        }
+        StringBuilder url = new StringBuilder(getReferrersPath(registry, artifactType));
+        if (artifactType == null) {
+            url.append("?last=").append(URLEncoder.encode(last, StandardCharsets.UTF_8));
+        } else {
+            url.append("&last=").append(URLEncoder.encode(last, StandardCharsets.UTF_8));
+        }
+        return url.toString();
+    }
+
+    /**
      * Return the referrers URL for this container referrer
      * @param artifactType The optional artifact type
      * @return The referrers URL
