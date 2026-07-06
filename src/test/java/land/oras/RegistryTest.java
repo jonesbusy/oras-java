@@ -2439,19 +2439,24 @@ class RegistryTest {
     }
 
     @Test
-    void shouldBlockPullWithRejectPolicy() throws IOException {
+    void shouldBlockPullWithRejectPolicy(@TempDir Path policyDir) throws IOException {
+
+        // Create 2 policies
+        ContainersPolicy acceptALl = ContainersPolicy.newPolicy(createAcceptAllPolicy(policyDir));
+        ContainersPolicy rejectAll = ContainersPolicy.newPolicy(createRejectPolicy(policyDir));
+
         // Create a registry with reject-all policy
         Registry registryWithPolicy = Registry.Builder.builder()
                 .defaults("myuser", "mypass")
                 .withInsecure(true)
-                .withPolicy(ContainersPolicy.rejectAll())
+                .withPolicy(rejectAll)
                 .build();
 
         // First push an artifact without policy enforcement
         Registry registryNormal = Registry.Builder.builder()
                 .defaults("myuser", "mypass")
                 .withInsecure(true)
-                .withPolicy(ContainersPolicy.acceptAll())
+                .withPolicy(acceptALl)
                 .build();
 
         ContainerRef containerRef =
@@ -2467,8 +2472,8 @@ class RegistryTest {
         // Pull fails with reject-all policy - verify exact error message
         OrasException ex = assertThrows(OrasException.class, () -> registryWithPolicy.getManifest(containerRef));
         assertTrue(
-                ex.getMessage().contains("rejected by containers policy"),
-                "Expected error message to contain 'rejected by containers policy', got: " + ex.getMessage());
+                ex.getMessage().contains("is blocked by registry configuration"),
+                "Expected error message to contain 'is blocked by registry configuration', got: " + ex.getMessage());
         assertTrue(
                 ex.getMessage().contains(containerRef.toString()),
                 "Expected error message to contain container ref, got: " + ex.getMessage());
@@ -2486,14 +2491,13 @@ class RegistryTest {
         Registry registryWithPolicy = Registry.Builder.builder()
                 .defaults("myuser", "mypass")
                 .withInsecure(true)
-                .withPolicy(policyFile)
+                .withPolicy(ContainersPolicy.newPolicy(policyFile))
                 .build();
 
         // Push an artifact first (with accept-all policy)
         Registry registryNormal = Registry.Builder.builder()
                 .defaults("myuser", "mypass")
                 .withInsecure(true)
-                .withPolicy(ContainersPolicy.acceptAll())
                 .build();
 
         ContainerRef containerRef =
@@ -2508,9 +2512,36 @@ class RegistryTest {
 
         // Pull fails with policy from file - verify exact error message format
         OrasException ex = assertThrows(OrasException.class, () -> registryWithPolicy.getManifest(containerRef));
-        String expectedMessage = "Image '%s' rejected by containers policy".formatted(containerRef);
+        String expectedMessage =
+                "Access to container reference %s is blocked by registry configuration".formatted(containerRef);
         assertEquals(expectedMessage, ex.getMessage());
 
         Files.deleteIfExists(policyFile);
+    }
+
+    private Path createRejectPolicy(Path tempDir) throws IOException {
+        Path output = Path.of(tempDir.toString(), "reject.json");
+        Files.writeString(
+                output,
+                // language=json
+                """
+                {
+                  "default": [{"type": "reject"}]
+                }
+                """);
+        return output;
+    }
+
+    private Path createAcceptAllPolicy(Path tempDir) throws IOException {
+        Path output = Path.of(tempDir.toString(), "accept.json");
+        Files.writeString(
+                output,
+                // language=json
+                """
+                {
+                  "default": [{"type": "insecureAcceptAnything"}]
+                }
+                """);
+        return output;
     }
 }

@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import land.oras.policy.ContainersPolicy;
 import land.oras.utils.ZotUnsecureContainer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -41,6 +42,18 @@ class JFrogArtifactoryITCase {
 
     @Container
     private final ZotUnsecureContainer unsecureRegistry = new ZotUnsecureContainer().withStartupAttempts(3);
+
+    @Test
+    void shouldPullWithSignature() {
+        Registry registry = Registry.builder()
+                .defaults()
+                .withPolicy(ContainersPolicy.newPolicy())
+                .build();
+        ContainerRef containerRef1 =
+                ContainerRef.parse("prj-elca-ai-oci.artifactory.svc.elca.ch/skills/jenkins-pipeline:0.0.17");
+        Manifest manifest = registry.getManifest(containerRef1);
+        assertNotNull(manifest);
+    }
 
     @Test
     void shouldPull() {

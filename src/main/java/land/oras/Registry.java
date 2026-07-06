@@ -2050,36 +2050,12 @@ public final class Registry extends OCI<ContainerRef> {
 
         /**
          * Set the containers trust policy to enforce during pull operations.
-         *
-         * <p>When set, all image manifest pulls will be evaluated against the policy before
-         * being returned. The {@code insecureAcceptAnything}, {@code reject}, and
-         * {@code sigstoreSigned} (keyed verification of attached Sigstore bundles) requirements are
-         * enforced. The {@code signedBy} (GPG simple signing) requirement is not implemented and will
-         * log a warning and accept the image without verification.
-         *
-         * <p>By default, the policy is loaded from standard locations
-         * ({@code $HOME/.config/containers/policy.json} or {@code /etc/containers/policy.json}).
-         * If no policy file is found, an accept-all policy is used.
-         *
          * @param policy the containers policy to enforce.
          * @return the builder
          * @see ContainersPolicy#newPolicy()
          */
         public Builder withPolicy(ContainersPolicy policy) {
             registry.setContainersPolicy(policy);
-            return this;
-        }
-
-        /**
-         * Load and set the containers trust policy from the given path.
-         *
-         * @param policyPath the path to the policy.json file.
-         * @return the builder
-         * @throws OrasException if the file cannot be read or parsed.
-         * @see ContainersPolicy#newPolicy(Path)
-         */
-        public Builder withPolicy(Path policyPath) {
-            registry.setContainersPolicy(ContainersPolicy.newPolicy(policyPath));
             return this;
         }
 

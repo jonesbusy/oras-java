@@ -28,6 +28,7 @@ import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import land.oras.exception.OrasException;
+import land.oras.policy.ContainersPolicy;
 import land.oras.policy.Transport;
 import land.oras.utils.Const;
 import land.oras.utils.SupportedAlgorithm;
@@ -560,15 +561,25 @@ public final class ContainerRef extends Ref<ContainerRef> {
                     effectiveRef);
             return true;
         }
+        return !isAllowed(effectiveRef, registry.getContainersPolicy());
+    }
 
+    /**
+     * Check if an effective (already resolved) reference is blocked by the given policy
+     * @param effectiveRef The effective reference
+     * @param policy The policy
+     * @return True or false
+     */
+    public boolean isAllowed(ContainerRef effectiveRef, ContainersPolicy policy) {
         // Check containers policy. Strip a trailing ":tag" and/or "@digest" without touching a
         // "host:port" registry (the tag colon always follows the last "/").
         String scope = effectiveRef.toString().replaceFirst("(:[^/@]+)?(@[^/]+)?$", "");
-        boolean allowed = registry.getContainersPolicy().isAllowed(Transport.DOCKER, scope);
-        if (!allowed) {
-            throw new OrasException("Image '%s' rejected by containers policy".formatted(this));
+        boolean allowed = policy.isAllowed(Transport.DOCKER, scope);
+        if (allowed) {
+            LOG.debug("Access to container reference {} is allowed by policy", effectiveRef);
+            return true;
         }
-
+        LOG.info("Access to container reference {} is not allowed by policy", effectiveRef);
         return false;
     }
 

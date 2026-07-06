@@ -42,21 +42,6 @@ import uk.org.webcompere.systemstubs.environment.EnvironmentVariables;
 class ContainersPolicyTest {
 
     @Test
-    void acceptAllPolicyAllowsEverything() {
-        ContainersPolicy policy = ContainersPolicy.acceptAll();
-        assertTrue(policy.isAllowed(Transport.DOCKER, "docker.io/library/nginx"));
-        assertTrue(policy.isAllowed(Transport.DOCKER, "quay.io/foo/bar"));
-        assertTrue(policy.isAllowed(Transport.UNKNOWN, ""));
-    }
-
-    @Test
-    void rejectAllPolicyDeniesEverything() {
-        ContainersPolicy policy = ContainersPolicy.rejectAll();
-        assertFalse(policy.isAllowed(Transport.DOCKER, "docker.io/library/nginx"));
-        assertFalse(policy.isAllowed(Transport.DOCKER, "quay.io/foo/bar"));
-    }
-
-    @Test
     void loadAcceptAllFromFile() {
         Path path = resourcePath("policy/accept-all.json");
         ContainersPolicy policy = ContainersPolicy.newPolicy(path);
@@ -188,23 +173,6 @@ class ContainersPolicyTest {
             ContainersPolicy policy = ContainersPolicy.newPolicy();
             assertNotNull(policy);
             assertTrue(policy.isAllowed(Transport.DOCKER, "docker.io/library/nginx"));
-        });
-    }
-
-    @Test
-    void userPolicyTakesPrecedenceOverSystemPolicy(@TempDir Path homeDir) throws Exception {
-        // language=json
-        String userPolicyJson = """
-                {"default": [{"type": "reject"}]}
-                """;
-        writePolicyFile(homeDir, userPolicyJson);
-
-        TestUtils.withHome(homeDir, () -> {
-            ContainersPolicy policy = ContainersPolicy.newPolicy();
-            assertNotNull(policy);
-            // User's reject-all should win (we can't know what system policy says, but we know
-            // the user policy was loaded since docker.io is rejected)
-            assertFalse(policy.isAllowed(Transport.DOCKER, "docker.io/library/nginx"));
         });
     }
 

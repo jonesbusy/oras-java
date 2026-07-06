@@ -91,7 +91,7 @@ public class ContainersPolicy {
         }
 
         LOG.warn("No containers policy.json found; using insecureAcceptAnything default");
-        return acceptAll();
+        return new ContainersPolicy(PolicyFile.fromJson(List.of(new PolicyRequirement.InsecureAcceptAnything()), null));
     }
 
     /**
@@ -110,27 +110,6 @@ public class ContainersPolicy {
         } catch (Exception e) {
             throw new OrasException("Failed to load containers policy from " + path, e);
         }
-    }
-
-    /**
-     * Create a policy that accepts any image unconditionally.
-     *
-     * @return a permissive {@link ContainersPolicy}.
-     */
-    public static ContainersPolicy acceptAll() {
-        PolicyFile policyFile =
-                new PolicyFile(List.of(new PolicyRequirement.InsecureAcceptAnything()), Collections.emptyMap());
-        return new ContainersPolicy(policyFile);
-    }
-
-    /**
-     * Create a policy that rejects every image unconditionally.
-     *
-     * @return a rejecting {@link ContainersPolicy}.
-     */
-    public static ContainersPolicy rejectAll() {
-        PolicyFile policyFile = new PolicyFile(List.of(new PolicyRequirement.Reject()), Collections.emptyMap());
-        return new ContainersPolicy(policyFile);
     }
 
     /**
@@ -295,11 +274,6 @@ public class ContainersPolicy {
     }
 
     private static List<Path> defaultPolicyPaths() {
-        String home = System.getenv("HOME");
-        if (home != null) {
-            return List.of(
-                    Path.of(home, ".config", "containers", "policy.json"), Path.of("/etc/containers/policy.json"));
-        }
         return List.of(Path.of("/etc/containers/policy.json"));
     }
 
