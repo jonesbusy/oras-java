@@ -4,7 +4,7 @@
 
   <groupId>land.oras</groupId>
   <artifactId>oras-java-sdk</artifactId>
-  <version>0.8.0</version>
+  <version>0.8.1-SNAPSHOT</version>
   <packaging>jar</packaging>
   <name>${project.groupId}:${project.artifactId}</name>
   <description>ORAS Java SDK</description>
@@ -29,7 +29,7 @@
   <scm>
     <connection>scm:git:git@github.com:oras-project/oras-java.git</connection>
     <developerConnection>scm:git:git@github.com:oras-project/oras-java.git</developerConnection>
-    <tag>0.8.0</tag>
+    <tag>HEAD</tag>
     <url>https://github.com/oras-project/oras-java</url>
   </scm>
 
@@ -45,7 +45,7 @@
 
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-    <project.build.outputTimestamp>2026-07-07T05:55:06Z</project.build.outputTimestamp>
+    <project.build.outputTimestamp>2026-07-07T05:55:36Z</project.build.outputTimestamp>
 
     <spotless.check.skip>false</spotless.check.skip>
     <enforcer.skip>false</enforcer.skip>
