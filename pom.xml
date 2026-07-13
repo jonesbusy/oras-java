@@ -65,7 +65,7 @@
 
     <!-- Test dependencies version -->
     <logback.version>1.5.38</logback.version>
-    <junit.version>6.1.1</junit.version>
+    <junit.version>6.1.2</junit.version>
     <testcontainer.version>2.0.5</testcontainer.version>
     <wiremock.version>3.13.2</wiremock.version>
     <mockito.version>5.23.0</mockito.version>
