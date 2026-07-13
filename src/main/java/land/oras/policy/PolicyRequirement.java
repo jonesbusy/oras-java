@@ -103,7 +103,9 @@ public abstract sealed class PolicyRequirement
         /**
          * Constructor
          */
-        public InsecureAcceptAnything() {}
+        public InsecureAcceptAnything() {
+            // Default constructor required for Jackson deserialization
+        }
 
         @Override
         public String getType() {
@@ -143,7 +145,9 @@ public abstract sealed class PolicyRequirement
         /**
          * Constructor
          */
-        public Reject() {}
+        public Reject() {
+            // Default constructor required for Jackson deserialization
+        }
 
         @Override
         public String getType() {
@@ -181,7 +185,9 @@ public abstract sealed class PolicyRequirement
         /**
          * Constructor. Any JSON fields on a {@code signedBy} requirement are ignored.
          */
-        public SignedBy() {}
+        public SignedBy() {
+            // Default constructor required for Jackson deserialization
+        }
 
         @Override
         public String getType() {

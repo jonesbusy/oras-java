@@ -30,7 +30,9 @@ public final class NoAuthProvider implements AuthProvider {
     /**
      * Constructor
      */
-    public NoAuthProvider() {}
+    public NoAuthProvider() {
+        // No initialization needed for no-auth provider
+    }
 
     @Override
     public String getAuthHeader(ContainerRef registry) {

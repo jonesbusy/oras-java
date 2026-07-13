@@ -954,22 +954,34 @@ public final class HttpClient {
         }
 
         @Override
-        public void checkClientTrusted(X509Certificate[] chain, String authType) {}
+        public void checkClientTrusted(X509Certificate[] chain, String authType) {
+            // Intentionally empty: this trust manager skips all certificate verification
+        }
 
         @Override
-        public void checkServerTrusted(X509Certificate[] chain, String authType) {}
+        public void checkServerTrusted(X509Certificate[] chain, String authType) {
+            // Intentionally empty: this trust manager skips all certificate verification
+        }
 
         @Override
-        public void checkClientTrusted(X509Certificate[] chain, String authType, Socket socket) {}
+        public void checkClientTrusted(X509Certificate[] chain, String authType, Socket socket) {
+            // Intentionally empty: this trust manager skips all certificate verification
+        }
 
         @Override
-        public void checkServerTrusted(X509Certificate[] chain, String authType, Socket socket) {}
+        public void checkServerTrusted(X509Certificate[] chain, String authType, Socket socket) {
+            // Intentionally empty: this trust manager skips all certificate verification
+        }
 
         @Override
-        public void checkClientTrusted(X509Certificate[] chain, String authType, SSLEngine engine) {}
+        public void checkClientTrusted(X509Certificate[] chain, String authType, SSLEngine engine) {
+            // Intentionally empty: this trust manager skips all certificate verification
+        }
 
         @Override
-        public void checkServerTrusted(X509Certificate[] chain, String authType, SSLEngine engine) {}
+        public void checkServerTrusted(X509Certificate[] chain, String authType, SSLEngine engine) {
+            // Intentionally empty: this trust manager skips all certificate verification
+        }
     }
 
     /**
