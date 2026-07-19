@@ -24,6 +24,8 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import java.security.PublicKey;
+import java.util.List;
 import land.oras.OrasModel;
 import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
@@ -203,14 +205,21 @@ public abstract sealed class PolicyRequirement
     /**
      * Require a valid keyed Sigstore/Cosign signature attached to the image as an OCI referrer.
      *
-     * Only public keys on keyPath or keyData are supported; keyless verification is not supported
+     * <p>Exactly one of {@code keyPath}, {@code keyPaths}, {@code keyData}, or {@code keyDatas} must
+     * be present; keyless verification is not supported.
      *
-     * <p>JSON example ({@code signedIdentity}, if present, is ignored):
+     * <ul>
+     *   <li>{@code keyPath} / {@code keyData} – a single Sigstore public key; only signatures made
+     *       by this key are accepted.</li>
+     *   <li>{@code keyPaths} / {@code keyDatas} – a list of Sigstore public keys; signatures made
+     *       by <em>any</em> key in the list are accepted.</li>
+     * </ul>
+     *
+     * <p>JSON examples ({@code signedIdentity}, if present, is ignored):
      * <pre>{@code
-     * {
-     *   "type": "sigstoreSigned",
-     *   "keyPath": "/etc/pki/containers/cosign.pub"
-     * }
+     * {"type": "sigstoreSigned", "keyPath": "/etc/pki/containers/cosign.pub"}
+     * {"type": "sigstoreSigned", "keyPaths": ["/etc/pki/a.pub", "/etc/pki/b.pub"]}
+     * {"type": "sigstoreSigned", "keyDatas": ["<base64-pem>", "<base64-pem>"]}
      * }</pre>
      */
     @OrasModel
@@ -228,18 +237,37 @@ public abstract sealed class PolicyRequirement
 
         private final @Nullable String keyPath;
         private final @Nullable String keyData;
+        private final @Nullable List<String> keyPaths;
+        private final @Nullable List<String> keyDatas;
 
         /**
          * Creates a new {@link SigstoreSigned} requirement.
          *
-         * @param keyPath path to a Sigstore/Cosign public key file (mutually exclusive with {@code keyData}).
-         * @param keyData base64-encoded Sigstore/Cosign public key (mutually exclusive with {@code keyPath}).
+         * @param keyPath  path to a single Sigstore/Cosign public key file.
+         * @param keyData  base64-encoded single Sigstore/Cosign public key.
+         * @param keyPaths list of paths to Sigstore/Cosign public key files.
+         * @param keyDatas list of base64-encoded Sigstore/Cosign public keys.
          */
         @JsonCreator
         public SigstoreSigned(
-                @JsonProperty("keyPath") @Nullable String keyPath, @JsonProperty("keyData") @Nullable String keyData) {
+                @JsonProperty("keyPath") @Nullable String keyPath,
+                @JsonProperty("keyData") @Nullable String keyData,
+                @JsonProperty("keyPaths") @Nullable List<String> keyPaths,
+                @JsonProperty("keyDatas") @Nullable List<String> keyDatas) {
             this.keyPath = keyPath;
             this.keyData = keyData;
+            this.keyPaths = keyPaths;
+            this.keyDatas = keyDatas;
+        }
+
+        /**
+         * Convenience constructor for a single key (backward compatibility).
+         *
+         * @param keyPath path to a Sigstore/Cosign public key file (mutually exclusive with {@code keyData}).
+         * @param keyData base64-encoded Sigstore/Cosign public key (mutually exclusive with {@code keyPath}).
+         */
+        public SigstoreSigned(@Nullable String keyPath, @Nullable String keyData) {
+            this(keyPath, keyData, null, null);
         }
 
         @Override
@@ -258,26 +286,24 @@ public abstract sealed class PolicyRequirement
                         context.getScope());
                 return true;
             }
-            if (keyPath == null && keyData == null) {
+            if (keyPath == null && keyData == null && keyPaths == null && keyDatas == null) {
                 LOG.warn(
-                        "Policy requirement '{}' for {} has no keyPath or keyData "
+                        "Policy requirement '{}' for {} has no keyPath, keyPaths, keyData, or keyDatas "
                                 + "(keyless verification is not supported); rejecting",
                         getType(),
                         context.getReference());
                 return false;
             }
-            java.security.PublicKey key = SigstoreVerifier.loadKey(this);
-            if (key == null) {
+            List<PublicKey> keys = SigstoreVerifier.loadKeys(this);
+            if (keys.isEmpty()) {
                 LOG.warn(
-                        "Policy requirement '{}' for {} could not load the configured public key "
-                                + "(keyPath={}, keyData={}); rejecting",
+                        "Policy requirement '{}' for {} could not load any configured public key; rejecting",
                         getType(),
-                        context.getReference(),
-                        keyPath,
-                        keyData != null ? "<set>" : null);
+                        context.getReference());
                 return false;
             }
-            boolean verified = SigstoreVerifier.verify(context.fetchSignatureBundle(), imageDigest, key);
+            List<byte[]> bundles = context.fetchSignatureBundle();
+            boolean verified = SigstoreVerifier.verifyWithAnyKey(bundles, imageDigest, keys);
             if (!verified) {
                 LOG.warn(
                         "Policy requirement '{}' failed: no valid signature for {}", getType(), context.getReference());
@@ -301,6 +327,24 @@ public abstract sealed class PolicyRequirement
          */
         public @Nullable String getKeyData() {
             return keyData;
+        }
+
+        /**
+         * Return the list of paths to Sigstore/Cosign public key files, or {@code null} if not set.
+         *
+         * @return the key paths list, may be {@code null}.
+         */
+        public @Nullable List<String> getKeyPaths() {
+            return keyPaths;
+        }
+
+        /**
+         * Return the list of base64-encoded Sigstore/Cosign public keys, or {@code null} if not set.
+         *
+         * @return the key datas list, may be {@code null}.
+         */
+        public @Nullable List<String> getKeyDatas() {
+            return keyDatas;
         }
     }
 }

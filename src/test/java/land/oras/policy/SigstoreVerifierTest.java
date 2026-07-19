@@ -125,6 +125,52 @@ class SigstoreVerifierTest {
     }
 
     @Test
+    void loadsKeysFromKeyPathsAndKeyDatas(@TempDir Path dir) throws Exception {
+        KeyPair kp1 = generateEcKeyPair();
+        KeyPair kp2 = generateEcKeyPair();
+        String pem1 = toPem(kp1.getPublic());
+        String pem2 = toPem(kp2.getPublic());
+
+        Path keyFile1 = dir.resolve("cosign1.pub");
+        Path keyFile2 = dir.resolve("cosign2.pub");
+        Files.writeString(keyFile1, pem1);
+        Files.writeString(keyFile2, pem2);
+
+        String keyData1 = Base64.getEncoder().encodeToString(pem1.getBytes(StandardCharsets.UTF_8));
+        String keyData2 = Base64.getEncoder().encodeToString(pem2.getBytes(StandardCharsets.UTF_8));
+
+        // keyPaths list
+        PolicyRequirement.SigstoreSigned fromPaths = new PolicyRequirement.SigstoreSigned(
+                null, null, List.of(keyFile1.toString(), keyFile2.toString()), null);
+        List<java.security.PublicKey> loadedFromPaths = SigstoreVerifier.loadKeys(fromPaths);
+        assertEquals(2, loadedFromPaths.size());
+
+        // keyDatas list
+        PolicyRequirement.SigstoreSigned fromDatas =
+                new PolicyRequirement.SigstoreSigned(null, null, null, List.of(keyData1, keyData2));
+        List<java.security.PublicKey> loadedFromDatas = SigstoreVerifier.loadKeys(fromDatas);
+        assertEquals(2, loadedFromDatas.size());
+    }
+
+    @Test
+    void verifyWithAnyKeyAcceptsSignatureFromAnyKeyInList() throws Exception {
+        KeyPair kp1 = generateEcKeyPair();
+        KeyPair kp2 = generateEcKeyPair();
+
+        // Bundle signed by kp1
+        byte[] bundle = buildBundle(kp1.getPrivate(), IMAGE_HEX, Const.KEY_SHA256_ECDSA_SIGNATURE_ALGORITHM);
+
+        // Verification passes when kp1 is in the list (even with kp2 present)
+        assertTrue(SigstoreVerifier.verifyWithAnyKey(
+                List.of(bundle), IMAGE_DIGEST, List.of(kp1.getPublic(), kp2.getPublic())));
+
+        // Verification fails when neither key matches
+        KeyPair kp3 = generateEcKeyPair();
+        assertFalse(SigstoreVerifier.verifyWithAnyKey(
+                List.of(bundle), IMAGE_DIGEST, List.of(kp2.getPublic(), kp3.getPublic())));
+    }
+
+    @Test
     void policyVerificationPassesForSignedImageAndFailsWhenTampered(@TempDir Path dir) throws Exception {
         KeyPair kp = generateEcKeyPair();
         byte[] bundle = buildBundle(kp.getPrivate(), IMAGE_HEX, Const.KEY_SHA256_ECDSA_SIGNATURE_ALGORITHM);

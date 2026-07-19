@@ -101,13 +101,28 @@ final class SigstoreVerifier {
      * @return {@code true} if at least one bundle verifies and binds to {@code imageDigest}.
      */
     static boolean verify(List<byte[]> bundles, String imageDigest, PublicKey trustedKey) {
+        return verifyWithAnyKey(bundles, imageDigest, List.of(trustedKey));
+    }
+
+    /**
+     * Verify that at least one of the given Sigstore bundles is a valid signature, made by
+     * <em>any</em> of the trusted keys, over the given image digest.
+     *
+     * @param bundles     the raw bundle blob bytes fetched from the registry (one per referrer).
+     * @param imageDigest the full image digest being pulled, e.g. {@code "sha256:abc..."}.
+     * @param trustedKeys the list of public keys configured in the policy requirement.
+     * @return {@code true} if at least one bundle verifies and binds to {@code imageDigest}.
+     */
+    static boolean verifyWithAnyKey(List<byte[]> bundles, String imageDigest, List<PublicKey> trustedKeys) {
         if (bundles.isEmpty()) {
             LOG.debug("No Sigstore bundles attached to image {}", imageDigest);
             return false;
         }
         for (byte[] bundle : bundles) {
-            if (verifyBundle(bundle, imageDigest, trustedKey)) {
-                return true;
+            for (PublicKey key : trustedKeys) {
+                if (verifyBundle(bundle, imageDigest, key)) {
+                    return true;
+                }
             }
         }
         LOG.debug("No attached Sigstore bundle verified for artifact with digest {}", imageDigest);
@@ -261,6 +276,52 @@ final class SigstoreVerifier {
             return loadKeyFromData(keyData);
         }
         return null;
+    }
+
+    /**
+     * Load all public keys configured on a {@link PolicyRequirement.SigstoreSigned} requirement.
+     * Considers {@code keyPath}, {@code keyData}, {@code keyPaths}, and {@code keyDatas}.
+     * Keys that fail to load are skipped with a warning.
+     *
+     * @param requirement the policy requirement.
+     * @return a non-null (possibly empty) list of successfully loaded public keys.
+     */
+    static List<PublicKey> loadKeys(PolicyRequirement.SigstoreSigned requirement) {
+        java.util.List<PublicKey> keys = new java.util.ArrayList<>();
+
+        // Single-key fields
+        PublicKey single = loadKey(requirement);
+        if (single != null) {
+            keys.add(single);
+        }
+
+        // keyPaths list
+        List<String> keyPaths = requirement.getKeyPaths();
+        if (keyPaths != null) {
+            for (String path : keyPaths) {
+                PublicKey k = loadKeyFromPath(path);
+                if (k != null) {
+                    keys.add(k);
+                } else {
+                    LOG.warn("Failed to load public key from keyPaths entry: {}", path);
+                }
+            }
+        }
+
+        // keyDatas list
+        List<String> keyDatas = requirement.getKeyDatas();
+        if (keyDatas != null) {
+            for (String data : keyDatas) {
+                PublicKey k = loadKeyFromData(data);
+                if (k != null) {
+                    keys.add(k);
+                } else {
+                    LOG.warn("Failed to load public key from keyDatas entry");
+                }
+            }
+        }
+
+        return keys;
     }
 
     private static @Nullable PublicKey loadKeyFromPath(String path) {

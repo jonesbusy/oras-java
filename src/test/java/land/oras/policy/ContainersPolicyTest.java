@@ -348,6 +348,138 @@ class ContainersPolicyTest {
     }
 
     @Test
+    void sigstoreSignedWithKeyPathsList(@TempDir Path dir) throws IOException {
+        KeyPair kp1 = SigstoreTestSupport.generateKeyPair();
+        KeyPair kp2 = SigstoreTestSupport.generateKeyPair();
+        Path keyFile1 = dir.resolve("cosign1.pub");
+        Path keyFile2 = dir.resolve("cosign2.pub");
+        Files.writeString(keyFile1, SigstoreTestSupport.publicKeyPem(kp1.getPublic()));
+        Files.writeString(keyFile2, SigstoreTestSupport.publicKeyPem(kp2.getPublic()));
+
+        Path path = dir.resolve("policy.json");
+        // language=json
+        Files.writeString(
+                path,
+                """
+                {
+                  "default": [{"type": "reject"}],
+                  "transports": {
+                    "docker": {
+                      "registry.example.com/app": [{
+                        "type": "sigstoreSigned",
+                        "keyPaths": ["%s", "%s"]
+                      }]
+                    }
+                  }
+                }
+                """
+                        .formatted(
+                                keyFile1.toString().replace("\\", "\\\\"),
+                                keyFile2.toString().replace("\\", "\\\\")));
+        ContainersPolicy policy = ContainersPolicy.newPolicy(path);
+
+        // Accepted when signed by kp1
+        assertDoesNotThrow(() -> policy.verify(context(
+                "registry.example.com/app",
+                "registry.example.com/app:latest",
+                SigstoreTestSupport.signedBundle(kp1.getPrivate(), SigstoreTestSupport.IMAGE_DIGEST))));
+
+        // Accepted when signed by kp2
+        assertDoesNotThrow(() -> policy.verify(context(
+                "registry.example.com/app",
+                "registry.example.com/app:latest",
+                SigstoreTestSupport.signedBundle(kp2.getPrivate(), SigstoreTestSupport.IMAGE_DIGEST))));
+
+        // Rejected when signed by an untrusted key
+        KeyPair attacker = SigstoreTestSupport.generateKeyPair();
+        assertThrows(
+                OrasException.class,
+                () -> policy.verify(context(
+                        "registry.example.com/app",
+                        "registry.example.com/app:latest",
+                        SigstoreTestSupport.signedBundle(attacker.getPrivate(), SigstoreTestSupport.IMAGE_DIGEST))));
+    }
+
+    @Test
+    void sigstoreSignedWithKeyDatasList(@TempDir Path dir) throws IOException {
+        KeyPair kp1 = SigstoreTestSupport.generateKeyPair();
+        KeyPair kp2 = SigstoreTestSupport.generateKeyPair();
+
+        Path path = dir.resolve("policy.json");
+        // language=json
+        Files.writeString(
+                path,
+                """
+                {
+                  "default": [{"type": "reject"}],
+                  "transports": {
+                    "docker": {
+                      "registry.example.com/app": [{
+                        "type": "sigstoreSigned",
+                        "keyDatas": ["%s", "%s"]
+                      }]
+                    }
+                  }
+                }
+                """
+                        .formatted(
+                                SigstoreTestSupport.keyData(kp1.getPublic()),
+                                SigstoreTestSupport.keyData(kp2.getPublic())));
+        ContainersPolicy policy = ContainersPolicy.newPolicy(path);
+
+        // Accepted when signed by kp1
+        assertDoesNotThrow(() -> policy.verify(context(
+                "registry.example.com/app",
+                "registry.example.com/app:latest",
+                SigstoreTestSupport.signedBundle(kp1.getPrivate(), SigstoreTestSupport.IMAGE_DIGEST))));
+
+        // Accepted when signed by kp2
+        assertDoesNotThrow(() -> policy.verify(context(
+                "registry.example.com/app",
+                "registry.example.com/app:latest",
+                SigstoreTestSupport.signedBundle(kp2.getPrivate(), SigstoreTestSupport.IMAGE_DIGEST))));
+
+        // Rejected when signed by an untrusted key
+        KeyPair attacker = SigstoreTestSupport.generateKeyPair();
+        assertThrows(
+                OrasException.class,
+                () -> policy.verify(context(
+                        "registry.example.com/app",
+                        "registry.example.com/app:latest",
+                        SigstoreTestSupport.signedBundle(attacker.getPrivate(), SigstoreTestSupport.IMAGE_DIGEST))));
+    }
+
+    @Test
+    void sigstoreSignedKeyPathsDeserializesCorrectly(@TempDir Path dir) throws IOException {
+        Path path = dir.resolve("policy.json");
+        // language=json
+        Files.writeString(
+                path,
+                """
+                {
+                  "default": [{"type": "reject"}],
+                  "transports": {
+                    "docker": {
+                      "registry.example.com/app": [{
+                        "type": "sigstoreSigned",
+                        "keyPaths": ["/etc/pki/a.pub", "/etc/pki/b.pub"]
+                      }]
+                    }
+                  }
+                }
+                """);
+        ContainersPolicy policy = ContainersPolicy.newPolicy(path);
+        List<PolicyRequirement> reqs = policy.resolveRequirements(Transport.DOCKER, "registry.example.com/app");
+        assertEquals(1, reqs.size());
+        PolicyRequirement.SigstoreSigned sigstore = (PolicyRequirement.SigstoreSigned) reqs.get(0);
+        assertNull(sigstore.getKeyPath());
+        assertNull(sigstore.getKeyData());
+        assertNotNull(sigstore.getKeyPaths());
+        assertEquals(List.of("/etc/pki/a.pub", "/etc/pki/b.pub"), sigstore.getKeyPaths());
+        assertNull(sigstore.getKeyDatas());
+    }
+
+    @Test
     void signedByGpgIsDeniedBecauseNotImplemented(@TempDir Path dir) throws IOException {
         Path path = dir.resolve("policy.json");
         // language=json
