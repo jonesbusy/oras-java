@@ -8,7 +8,7 @@ This file provides guidance to agents when working with code in this repository.
 # Build (all checks + tests)
 mvn clean install
 
-# Quick build (skip tests, formatting, license checks)
+# Quick build (skip tests, formatting, license checks, spotless, javadoc)
 mvn clean install -Pquick-build
 
 # Unit tests only
@@ -40,12 +40,13 @@ mvn javadoc:javadoc
 
 Single-module Maven project. Main packages under `src/main/java/land/oras/`:
 
-| Package | Purpose |
-|---------|---------|
-| `land.oras` | Core API — `Registry`, `OCILayout`, `OCI`, data models |
-| `land.oras.auth` | Authentication providers and HTTP client |
-| `land.oras.utils` | Constants, JSON/TOML/YAML utils, digest, compression, archive |
-| `land.oras.exception` | `OrasException` and OCI error model |
+| Package               | Purpose                                                       |
+|-----------------------|---------------------------------------------------------------|
+| `land.oras`           | Core API — `Registry`, `OCILayout`, `OCI`, data models        |
+| `land.oras.auth`      | Authentication providers and HTTP client                      |
+| `land.oras.policy`    | Container policy classes                                      |
+| `land.oras.utils`     | Constants, JSON/TOML/YAML utils, digest, compression, archive |
+| `land.oras.exception` | `OrasException` and OCI error model                           |
 
 ### Core Abstraction
 

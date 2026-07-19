@@ -708,6 +708,8 @@
         <license.skipCheckLicense>true</license.skipCheckLicense>
         <spdx.skip>true</spdx.skip>
         <jacoco.skip>true</jacoco.skip>
+        <maven.javadoc.skip>true</maven.javadoc.skip>
+        <spotless.check.skip>true</spotless.check.skip>
       </properties>
     </profile>
     <profile>
