@@ -21,9 +21,9 @@ sources:
       repository: "maven"
       token: "{{ requiredEnv .github.token }}"
       username: "{{ .github.username }}"
-      versioning:
-        kind: semver
-        pattern: "3.(\\d{1,2}).(\\d{1,2})$"
+      versionFilter:
+        kind: regex
+        pattern: "maven-3.(\\d{1,2}).(\\d{1,2})$"
     transformers:
       - trimprefix: "maven-"
 
