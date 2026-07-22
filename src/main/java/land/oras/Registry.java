@@ -536,20 +536,23 @@ public final class Registry extends OCI<ContainerRef> {
         logResponse(response);
         handleError(response);
         Tags page = JsonUtils.fromJson(response.response(), Tags.class)
-                .withLast(getLastFromLink(response).orElse(null));
+                .withLast(getLastParamFromLink(response))
+                .withN(getNParamFromLink(response));
         if (page.last() == null) {
             return page;
         }
         // Follow pagination links, accumulating all tags, guarded against unbounded loops.
         List<String> allTags = new ArrayList<>(page.tags());
         String last = page.last();
+        Integer n = page.n();
         for (int pageNum = 1; last != null; pageNum++) {
             if (tagListMaxPages > 0 && pageNum >= tagListMaxPages) {
                 throw new OrasException(
                         "Tag listing exceeded %d pages: possible self-referential Link header from a rogue registry"
                                 .formatted(tagListMaxPages));
             }
-            Tags nextPage = getTags(ref, Integer.MAX_VALUE, last);
+
+            Tags nextPage = getTags(ref, n == null ? Integer.MAX_VALUE : n, last);
             allTags.addAll(nextPage.tags());
             last = nextPage.last();
         }
@@ -571,7 +574,8 @@ public final class Registry extends OCI<ContainerRef> {
         logResponse(response);
         handleError(response);
         return JsonUtils.fromJson(response.response(), Tags.class)
-                .withLast(getLastFromLink(response).orElse(null));
+                .withLast(getLastParamFromLink(response))
+                .withN(getNParamFromLink(response));
     }
 
     @Override
@@ -615,7 +619,7 @@ public final class Registry extends OCI<ContainerRef> {
         logResponse(response);
         handleError(response);
         Referrers page = JsonUtils.fromJson(response.response(), Referrers.class);
-        String last = getLastFromLink(response).orElse(null);
+        String last = getLastParamFromLink(response);
         if (last == null) {
             return page;
         }
@@ -634,7 +638,7 @@ public final class Registry extends OCI<ContainerRef> {
             handleError(nextResponse);
             Referrers nextPage = JsonUtils.fromJson(nextResponse.response(), Referrers.class);
             allManifests.addAll(nextPage.getManifests());
-            last = getLastFromLink(nextResponse).orElse(null);
+            last = getLastParamFromLink(response);
         }
         return Referrers.from(allManifests);
     }
@@ -1716,7 +1720,19 @@ public final class Registry extends OCI<ContainerRef> {
         return new ResolvedRegistry(ref.getRegistry(), response.headers());
     }
 
-    private Optional<String> getLastFromLink(HttpClient.ResponseWrapper<String> response) {
+    private @Nullable String getLastParamFromLink(HttpClient.ResponseWrapper<String> response) {
+        return getParamFromLink(response, Const.QUERY_PARAM_LAST).orElse(null);
+    }
+
+    private @Nullable Integer getNParamFromLink(HttpClient.ResponseWrapper<String> response) {
+        Optional<String> n = getParamFromLink(response, Const.QUERY_PARAM_N);
+        if (n.isPresent()) {
+            return Integer.parseInt(n.get());
+        }
+        return null;
+    }
+
+    private Optional<String> getParamFromLink(HttpClient.ResponseWrapper<String> response, String param) {
         String linkHeader = response.headers().get(Const.LINK_HEADER.toLowerCase());
         if (linkHeader == null) {
             return Optional.empty();
@@ -1735,10 +1751,10 @@ public final class Registry extends OCI<ContainerRef> {
         }
 
         String query = uri.substring(q + 1);
-        for (String param : query.split("&")) {
-            int eq = param.indexOf('=');
-            if (eq > 0 && "last".equals(param.substring(0, eq))) {
-                return Optional.of(param.substring(eq + 1));
+        for (String p : query.split("&")) {
+            int eq = p.indexOf('=');
+            if (eq > 0 && param.equals(p.substring(0, eq))) {
+                return Optional.of(p.substring(eq + 1));
             }
         }
 

@@ -104,6 +104,16 @@ public final class Const {
     public static final String DEFAULT_REGISTRY = "docker.io";
 
     /**
+     * Last query param for tag iteration
+     */
+    public static final String QUERY_PARAM_LAST = "last";
+
+    /**
+     * The N query param
+     */
+    public static final String QUERY_PARAM_N = "n";
+
+    /**
      * Default tag
      */
     public static final String DEFAULT_TAG = "latest";

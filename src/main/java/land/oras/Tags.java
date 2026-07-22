@@ -30,11 +30,12 @@ import org.jspecify.annotations.Nullable;
  * @param name The name
  * @param tags The tags
  * @param last The last tag index, to iterate
+ * @param n The n parameter, to iterate. As part of link response
  */
 @NullMarked
 @OrasModel
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record Tags(String name, List<String> tags, @Nullable String last) {
+public record Tags(String name, List<String> tags, @Nullable String last, @Nullable Integer n) {
 
     /**
      * Constructor without last
@@ -42,7 +43,7 @@ public record Tags(String name, List<String> tags, @Nullable String last) {
      * @param tags The tags
      */
     public Tags(String name, List<String> tags) {
-        this(name, tags, null);
+        this(name, tags, null, null);
     }
 
     /**
@@ -51,6 +52,15 @@ public record Tags(String name, List<String> tags, @Nullable String last) {
      * @return A new Tags object with the last index
      */
     public Tags withLast(@Nullable String last) {
-        return new Tags(this.name, this.tags, last);
+        return new Tags(this.name, this.tags, last, n);
+    }
+
+    /**
+     * With n param
+     * @param n The n param
+     * @return A new Tags object with the n param
+     */
+    public Tags withN(@Nullable Integer n) {
+        return new Tags(this.name, this.tags, last, n);
     }
 }

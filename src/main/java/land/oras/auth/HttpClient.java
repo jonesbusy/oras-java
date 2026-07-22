@@ -766,7 +766,7 @@ public final class HttpClient {
                     continue;
                 }
 
-                return redoRequest(uri, response, builder, handler, newScopes, authProvider);
+                return redoRequest(uri, response, builder, body, handler, newScopes, authProvider);
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -855,6 +855,7 @@ public final class HttpClient {
             URI originUri,
             HttpResponse<T> response,
             HttpRequest.Builder builder,
+            byte[] body,
             HttpResponse.BodyHandler<T> handler,
             Scopes scopes,
             AuthProvider authProvider) {
@@ -873,7 +874,9 @@ public final class HttpClient {
             String service = token.service();
             try {
                 builder = builder.setHeader(Const.AUTHORIZATION_HEADER, "Bearer " + bearerToken);
-                HttpResponse<T> newResponse = executeAndRecordRequest(builder.build(), handler);
+                HttpRequest request = builder.build();
+                logRequest(request, body);
+                HttpResponse<T> newResponse = executeAndRecordRequest(request, handler);
 
                 // Follow redirect
                 if (shouldRedirect(newResponse)) {

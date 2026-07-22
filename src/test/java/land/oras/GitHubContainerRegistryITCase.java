@@ -48,6 +48,15 @@ class GitHubContainerRegistryITCase {
     Path tempDir;
 
     @Test
+    void shouldGetTags() {
+        Registry registry = Registry.builder().build();
+        ContainerRef containerRef = ContainerRef.parse("ghcr.io/jenkinsci/helm-charts/jenkins");
+        Tags tags = registry.getTags(containerRef);
+        assertTrue(tags.tags().contains("5.9.40"), "Tag 5.9.40 must exists");
+        assertTrue(tags.tags().size() > 50, "More that 50 must be returned");
+    }
+
+    @Test
     void shouldPullIndex() {
         Registry registry = Registry.builder().build();
         ContainerRef containerRef1 = ContainerRef.parse("ghcr.io/oras-project/oras:main");
