@@ -64,8 +64,17 @@ jobs:
         if: matrix.java == '17'
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
-          files: target/site/jacoco/jacoco.xml
+          report_type: coverage
           token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+
+      - name: Upload test reports to Codecov
+        if: matrix.java == '17'
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          report_type: test_results
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
   maven-build-windows:
     runs-on: windows-latest
