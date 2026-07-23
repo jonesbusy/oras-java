@@ -42,18 +42,23 @@ class QuayIoITCase {
     @Test
     void shouldPullManifest() {
         Registry registry = Registry.builder().build();
-        ContainerRef containerRef1 = ContainerRef.parse(
-                "quay.io/openshift/origin-cli@sha256:569ebcccdc62d1dc1a2d01c05fbda49850747243d7afa838cf4601cd9e67e0fd");
-        Manifest manifest = registry.getManifest(containerRef1);
+        ContainerRef containerRef1 = ContainerRef.parse("quay.io/openshift/origin-cli:latest");
+        Index index = registry.getIndex(containerRef1);
+        ContainerRef containerRef2 =
+                containerRef1.withDigest(index.getManifests().get(0).getDigest());
+        Manifest manifest = registry.getManifest(containerRef2);
         assertNotNull(manifest);
     }
 
     @Test
     void shouldPullOneBlob() {
         Registry registry = Registry.builder().build();
-        ContainerRef containerRef1 = ContainerRef.parse(
-                "quay.io/openshift/origin-cli@sha256:569ebcccdc62d1dc1a2d01c05fbda49850747243d7afa838cf4601cd9e67e0fd");
-        Manifest manifest = registry.getManifest(containerRef1);
+        ContainerRef containerRef1 = ContainerRef.parse("quay.io/openshift/origin-cli:latest");
+        Index index = registry.getIndex(containerRef1);
+        ContainerRef containerRef2 =
+                containerRef1.withDigest(index.getManifests().get(0).getDigest());
+        Manifest manifest = registry.getManifest(containerRef2);
+        assertNotNull(manifest);
         Layer oneLayer = manifest.getLayers().get(0);
         registry.fetchBlob(containerRef1.withDigest(oneLayer.getDigest()), tempDir.resolve("my-blob"));
         assertNotNull(tempDir.resolve("my-blob"));

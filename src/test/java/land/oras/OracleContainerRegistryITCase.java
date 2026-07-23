@@ -32,11 +32,11 @@ class OracleContainerRegistryITCase {
     private Path tempDir;
 
     @Test
-    void shouldPullManifest() {
+    void shouldPullIndex() {
         Registry registry = Registry.builder().build();
-        ContainerRef containerRef1 = ContainerRef.parse("container-registry.oracle.com/os/oraclelinux:latest");
-        Manifest manifest = registry.getManifest(containerRef1);
-        assertNotNull(manifest);
+        ContainerRef containerRef1 = ContainerRef.parse("container-registry.oracle.com/os/oraclelinux:8");
+        Index index = registry.getIndex(containerRef1);
+        assertNotNull(index);
     }
 
     @Test
