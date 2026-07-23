@@ -1765,4 +1765,112 @@ class RegistryWireMockTest {
                 exception.getMessage().contains("Referrer listing exceeded 2 pages"),
                 "Unexpected message: " + exception.getMessage());
     }
+
+    @Test
+    void shouldFallbackToReferrersTagSchemaWhenReferrersApiUnavailable(WireMockRuntimeInfo wmRuntimeInfo) {
+
+        String digest = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+        String referrersPath = "/v2/library/artifact-text/referrers/" + digest;
+        String fallbackTagPath = "/v2/library/artifact-text/manifests/"
+                + "sha256-44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+
+        String fallbackIndex =
+                """
+                {"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":\
+                [{"mediaType":"application/vnd.oci.image.manifest.v1+json",\
+                "digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1,\
+                "artifactType":"application/vnd.example+json"}]}""";
+
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        // Registry does not implement the Referrers API (e.g. GHCR)
+        wireMock.register(WireMock.get(WireMock.urlPathEqualTo(referrersPath)).willReturn(WireMock.notFound()));
+        // Fallback to the referrers tag schema:
+        wireMock.register(WireMock.get(WireMock.urlPathEqualTo(fallbackTagPath))
+                .willReturn(WireMock.aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/vnd.oci.image.index.v1+json")
+                        .withBody(fallbackIndex)));
+
+        Registry registry = Registry.Builder.builder()
+                .withAuthProvider(authProvider)
+                .withInsecure(true)
+                .build();
+
+        ContainerRef ref = ContainerRef.parse("%s/library/artifact-text"
+                        .formatted(wmRuntimeInfo.getHttpBaseUrl().replace("http://", "")))
+                .withDigest(digest);
+
+        Referrers referrers = registry.getReferrers(ref, null);
+        assertEquals(1, referrers.getManifests().size());
+        assertEquals(
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                referrers.getManifests().get(0).getDigest());
+    }
+
+    @Test
+    void shouldFilterFallbackReferrersByArtifactType(WireMockRuntimeInfo wmRuntimeInfo) {
+
+        String digest = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+        String referrersPath = "/v2/library/artifact-text/referrers/" + digest;
+        String fallbackTagPath = "/v2/library/artifact-text/manifests/"
+                + "sha256-44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+
+        String fallbackIndex =
+                """
+                {"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":\
+                [{"mediaType":"application/vnd.oci.image.manifest.v1+json",\
+                "digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1,\
+                "artifactType":"application/vnd.example+json"},\
+                {"mediaType":"application/vnd.oci.image.manifest.v1+json",\
+                "digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":1,\
+                "artifactType":"application/vnd.other+json"}]}""";
+
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        wireMock.register(WireMock.get(WireMock.urlPathEqualTo(referrersPath)).willReturn(WireMock.notFound()));
+        wireMock.register(WireMock.get(WireMock.urlPathEqualTo(fallbackTagPath))
+                .willReturn(WireMock.aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/vnd.oci.image.index.v1+json")
+                        .withBody(fallbackIndex)));
+
+        Registry registry = Registry.Builder.builder()
+                .withAuthProvider(authProvider)
+                .withInsecure(true)
+                .build();
+
+        ContainerRef ref = ContainerRef.parse("%s/library/artifact-text"
+                        .formatted(wmRuntimeInfo.getHttpBaseUrl().replace("http://", "")))
+                .withDigest(digest);
+
+        Referrers referrers = registry.getReferrers(ref, ArtifactType.from("application/vnd.example+json"));
+        assertEquals(1, referrers.getManifests().size());
+        assertEquals(
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                referrers.getManifests().get(0).getDigest());
+    }
+
+    @Test
+    void shouldReturnEmptyReferrersWhenFallbackTagDoesNotExist(WireMockRuntimeInfo wmRuntimeInfo) {
+
+        String digest = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+        String referrersPath = "/v2/library/artifact-text/referrers/" + digest;
+        String fallbackTagPath = "/v2/library/artifact-text/manifests/"
+                + "sha256-44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        wireMock.register(WireMock.get(WireMock.urlPathEqualTo(referrersPath)).willReturn(WireMock.notFound()));
+        wireMock.register(WireMock.get(WireMock.urlPathEqualTo(fallbackTagPath)).willReturn(WireMock.notFound()));
+
+        Registry registry = Registry.Builder.builder()
+                .withAuthProvider(authProvider)
+                .withInsecure(true)
+                .build();
+
+        ContainerRef ref = ContainerRef.parse("%s/library/artifact-text"
+                        .formatted(wmRuntimeInfo.getHttpBaseUrl().replace("http://", "")))
+                .withDigest(digest);
+
+        Referrers referrers = registry.getReferrers(ref, null);
+        assertTrue(referrers.getManifests().isEmpty());
+    }
 }

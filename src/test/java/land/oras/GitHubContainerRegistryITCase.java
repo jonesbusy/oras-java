@@ -20,6 +20,7 @@
 
 package land.oras;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -29,7 +30,6 @@ import land.oras.policy.ContainersPolicy;
 import land.oras.utils.ArchiveUtils;
 import land.oras.utils.Const;
 import land.oras.utils.ZotUnsecureContainer;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.Execution;
@@ -65,7 +65,19 @@ class GitHubContainerRegistryITCase {
     }
 
     @Test
-    @Disabled("Disabled because Referrers on GHCR")
+    void shouldGetReferrersUsingLegacyTagFallback() {
+        Registry registry = Registry.builder().build();
+        ContainerRef containerRef = ContainerRef.parse(
+                "ghcr.io/jonesbusy/alpine-signed@sha256:9e56ed4cb843f61658fcdb17d4205a87d5e217515f23831314b2173a776174d6");
+        Referrers referrers = registry.getReferrers(containerRef, null);
+        assertFalse(referrers.getManifests().isEmpty(), "Referrers must be found through the legacy tag fallback");
+        assertTrue(
+                referrers.getManifests().stream().anyMatch(manifest -> "application/vnd.dev.sigstore.bundle.v0.3+json"
+                        .equals(manifest.getArtifactType())),
+                "Sigstore bundle referrer must be found");
+    }
+
+    @Test
     @Execution(ExecutionMode.SAME_THREAD)
     void shouldPullSignedImage(@TempDir Path homeDir) throws Exception {
 

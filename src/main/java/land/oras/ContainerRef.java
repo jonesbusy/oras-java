@@ -225,6 +225,21 @@ public final class ContainerRef extends Ref<ContainerRef> {
         return new ContainerRef(registry, unqualified, namespace, repository, tag, digest);
     }
 
+    /**
+     * Return a copy of this reference pointing at the tag used by the referrers tag schema, the
+     * fallback used by registries that do not implement the Referrers API.
+     * See <a href="https://github.com/opencontainers/distribution-spec/blob/main/spec.md#referrers-tag-schema">Referrers Tag Schema</a>
+     * @return The container reference for the referrers fallback tag
+     */
+    public ContainerRef withReferrersFallbackTag() {
+        if (digest == null) {
+            throw new OrasException("Digest is required to compute the referrers fallback tag");
+        }
+        String fallbackTag = "%s-%s"
+                .formatted(SupportedAlgorithm.fromDigest(digest).getPrefix(), SupportedAlgorithm.getDigest(digest));
+        return new ContainerRef(registry, unqualified, namespace, repository, fallbackTag, null);
+    }
+
     @Override
     public SupportedAlgorithm getAlgorithm() {
         // Default if not set

@@ -617,6 +617,9 @@ public final class Registry extends OCI<ContainerRef> {
         HttpClient.ResponseWrapper<String> response = client.get(
                 uri, Map.of(Const.ACCEPT_HEADER, Const.DEFAULT_INDEX_MEDIA_TYPE), Scopes.of(ref), authProvider);
         logResponse(response);
+        if (response.statusCode() == 404) {
+            return getReferrersFallback(ref, artifactType);
+        }
         handleError(response);
         Referrers page = JsonUtils.fromJson(response.response(), Referrers.class);
         String last = getLastParamFromLink(response);
@@ -641,6 +644,37 @@ public final class Registry extends OCI<ContainerRef> {
             last = getLastParamFromLink(response);
         }
         return Referrers.from(allManifests);
+    }
+
+    /**
+     * Fallback to the referrers tag schema when the Referrers API is unavailable (returns 404).
+     * See <a href="https://github.com/opencontainers/distribution-spec/blob/main/spec.md#unavailable-referrers-api">Unavailable Referrers API</a>
+     * @param ref The container reference (with digest) to find referrers of
+     * @param artifactType The optional artifact type to filter on
+     * @return The referrers, or an empty list if the fallback tag does not exist or is not a valid index
+     */
+    private Referrers getReferrersFallback(ContainerRef ref, @Nullable ArtifactType artifactType) {
+        ContainerRef fallbackRef = ref.withReferrersFallbackTag();
+        URI uri = URI.create("%s://%s".formatted(getScheme(), fallbackRef.getManifestsPath(this)));
+        HttpClient.ResponseWrapper<String> response = client.get(
+                uri, Map.of(Const.ACCEPT_HEADER, Const.DEFAULT_INDEX_MEDIA_TYPE), Scopes.of(fallbackRef), authProvider);
+        logResponse(response);
+        if (response.statusCode() >= 400) {
+            // No referrers tag either: assume there are no referrers for this digest
+            return Referrers.from(List.of());
+        }
+        String contentType = response.headers().get(Const.CONTENT_TYPE_HEADER.toLowerCase());
+        if (contentType == null || !isIndexMediaType(contentType)) {
+            // Not a valid image index: assume there are no referrers for this digest
+            return Referrers.from(List.of());
+        }
+        List<ManifestDescriptor> manifests = Index.fromJson(response.response()).getManifests();
+        if (artifactType != null) {
+            manifests = manifests.stream()
+                    .filter(manifest -> artifactType.getMediaType().equals(manifest.getArtifactType()))
+                    .toList();
+        }
+        return Referrers.from(manifests);
     }
 
     /**
