@@ -22,7 +22,6 @@ package land.oras;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-import java.io.IOException;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -44,16 +43,16 @@ class QuayIoITCase {
     void shouldPullManifest() {
         Registry registry = Registry.builder().build();
         ContainerRef containerRef1 = ContainerRef.parse(
-                "quay.io/openshift/origin-cli@sha256:58b3680e6f8141829412f3010477ed84ebc73da65665dcde988e0b2a1276ae1f");
+                "quay.io/openshift/origin-cli@sha256:569ebcccdc62d1dc1a2d01c05fbda49850747243d7afa838cf4601cd9e67e0fd");
         Manifest manifest = registry.getManifest(containerRef1);
         assertNotNull(manifest);
     }
 
     @Test
-    void shouldPullOneBlob() throws IOException {
+    void shouldPullOneBlob() {
         Registry registry = Registry.builder().build();
         ContainerRef containerRef1 = ContainerRef.parse(
-                "quay.io/openshift/origin-cli@sha256:58b3680e6f8141829412f3010477ed84ebc73da65665dcde988e0b2a1276ae1f");
+                "quay.io/openshift/origin-cli@sha256:569ebcccdc62d1dc1a2d01c05fbda49850747243d7afa838cf4601cd9e67e0fd");
         Manifest manifest = registry.getManifest(containerRef1);
         Layer oneLayer = manifest.getLayers().get(0);
         registry.fetchBlob(containerRef1.withDigest(oneLayer.getDigest()), tempDir.resolve("my-blob"));

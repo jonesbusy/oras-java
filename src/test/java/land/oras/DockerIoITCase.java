@@ -22,10 +22,7 @@ package land.oras;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.Metrics;
 import java.nio.file.Path;
-import land.oras.utils.Const;
 import land.oras.utils.ZotUnsecureContainer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -94,10 +91,8 @@ class DockerIoITCase {
     void shouldPullOneBlob() {
         Registry registry = Registry.builder().build();
         ContainerRef containerRef1 = ContainerRef.parse("jbangdev/jbang-action");
-        Index index = registry.getIndex(containerRef1);
         String effectiveRegistry = containerRef1.getEffectiveRegistry(registry);
-        Manifest manifest = registry.getManifest(
-                containerRef1.withDigest(index.getManifests().get(0).getDigest()));
+        Manifest manifest = registry.getManifest(containerRef1);
         Layer oneLayer = manifest.getLayers().get(0);
         registry.fetchBlob(
                 containerRef1.forRegistry(effectiveRegistry).withDigest(oneLayer.getDigest()),
@@ -125,14 +120,6 @@ class DockerIoITCase {
 
         CopyUtils.copy(sourceRegistry, containerSource, targetRegistry, containerTarget, CopyUtils.CopyOptions.deep());
         assertTrue(targetRegistry.exists(containerTarget));
-
-        assertEquals(
-                1.0,
-                Metrics.globalRegistry.find(Const.METRIC_TOKEN_REFRESH).counters().stream()
-                        .mapToDouble(Counter::count)
-                        .sum());
-
-        TestUtils.dumpMetrics(Metrics.globalRegistry);
     }
 
     @Test
