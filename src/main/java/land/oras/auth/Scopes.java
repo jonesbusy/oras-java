@@ -36,7 +36,7 @@ public final class Scopes {
     /**
      * List of scopes
      */
-    private final List<String> scopes;
+    private final List<String> scopeItems;
 
     /**
      * Service
@@ -47,6 +47,11 @@ public final class Scopes {
      * The container reference
      */
     private final ContainerRef containerRef;
+
+    /**
+     * Registry scope prefix
+     */
+    private static final String REGISTRY_PREFIX = "registry:";
 
     /**
      * Private constructor
@@ -67,7 +72,7 @@ public final class Scopes {
     private Scopes(ContainerRef containerRef, @Nullable String service, List<String> scopes) {
         this.containerRef = containerRef;
         this.service = service;
-        this.scopes = scopes;
+        this.scopeItems = scopes;
     }
 
     /**
@@ -117,7 +122,7 @@ public final class Scopes {
      */
     public Scopes withAddedRegistryScopes(Scope... newScopes) {
         return new Scopes(
-                containerRef, service, ScopeUtils.appendRepositoryScope(this.scopes, containerRef, newScopes));
+                containerRef, service, ScopeUtils.appendRepositoryScope(this.scopeItems, containerRef, newScopes));
     }
 
     /**
@@ -126,7 +131,7 @@ public final class Scopes {
      * @return A new Scopes object with the given scopes
      */
     public Scopes withAddedGlobalScopes(String... globalScopes) {
-        List<String> newScopes = new LinkedList<>(scopes);
+        List<String> newScopes = new LinkedList<>(scopeItems);
         newScopes.addAll(List.of(globalScopes));
         return new Scopes(
                 containerRef, service, newScopes.stream().sorted().distinct().toList());
@@ -137,8 +142,8 @@ public final class Scopes {
      * @return A new Scopes object with only global scopes
      */
     public Scopes withOnlyGlobalScopes() {
-        List<String> globalScopes = scopes.stream()
-                .filter(s -> !s.startsWith("repository:") && !s.startsWith("registry:"))
+        List<String> globalScopes = scopeItems.stream()
+                .filter(s -> !s.startsWith("repository:") && !s.startsWith(REGISTRY_PREFIX))
                 .sorted()
                 .distinct()
                 .toList();
@@ -150,8 +155,8 @@ public final class Scopes {
      * @return A new Scopes object with only non-global scopes
      */
     public Scopes withoutGlobalScopes() {
-        List<String> nonGlobalScopes = scopes.stream()
-                .filter(s -> s.startsWith("repository:") || s.startsWith("registry:"))
+        List<String> nonGlobalScopes = scopeItems.stream()
+                .filter(s -> s.startsWith("repository:") || s.startsWith(REGISTRY_PREFIX))
                 .sorted()
                 .distinct()
                 .toList();
@@ -164,7 +169,7 @@ public final class Scopes {
      * @return A new Scopes object with the given scope
      */
     public Scopes withNewScope(String scope) {
-        List<String> newScopes = new LinkedList<>(scopes);
+        List<String> newScopes = new LinkedList<>(scopeItems);
         newScopes.add(scope);
         return new Scopes(containerRef, service, ScopeUtils.cleanScopes(newScopes));
     }
@@ -175,7 +180,7 @@ public final class Scopes {
      * @return A new Scopes object with the given service
      */
     public Scopes withService(@Nullable String service) {
-        return new Scopes(containerRef, service, scopes);
+        return new Scopes(containerRef, service, scopeItems);
     }
 
     /**
@@ -191,7 +196,7 @@ public final class Scopes {
      * @return The scopes
      */
     public List<String> getScopes() {
-        return scopes;
+        return scopeItems;
     }
 
     /**
@@ -216,7 +221,7 @@ public final class Scopes {
      * @return True if these are global scopes, false otherwise
      */
     public boolean isGlobal() {
-        return scopes.stream().noneMatch(s -> s.startsWith("repository:") || s.startsWith("registry:"));
+        return scopeItems.stream().noneMatch(s -> s.startsWith("repository:") || s.startsWith(REGISTRY_PREFIX));
     }
 
     /**
@@ -224,7 +229,7 @@ public final class Scopes {
      * @return True if these scopes include global scopes, false otherwise
      */
     public boolean hasGlobalScopes() {
-        return scopes.stream().anyMatch(s -> !s.startsWith("repository:") && !s.startsWith("registry:"));
+        return scopeItems.stream().anyMatch(s -> !s.startsWith("repository:") && !s.startsWith(REGISTRY_PREFIX));
     }
 
     /**
@@ -232,7 +237,7 @@ public final class Scopes {
      * @return True if these are pull-only scopes, false otherwise
      */
     public boolean isPullOnly() {
-        return !isGlobal() && scopes.stream().allMatch(s -> s.endsWith(":pull"));
+        return !isGlobal() && scopeItems.stream().allMatch(s -> s.endsWith(":pull"));
     }
 
     @Override
@@ -253,8 +258,8 @@ public final class Scopes {
 
     @Override
     public String toString() {
-        return "Scopes{" + "scopes="
-                + scopes + ", service='"
+        return "Scopes{" + "scopeItems="
+                + scopeItems + ", service='"
                 + service + '\'' + ", registry="
                 + containerRef.getRegistry() + '}';
     }

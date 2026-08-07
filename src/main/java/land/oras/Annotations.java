@@ -110,13 +110,16 @@ public record Annotations(
      * Annotations file format
      */
     private static class AnnotationFile extends HashMap<String, Map<String, String>> {
+        private static final String MANIFEST_KEY = "$manifest";
+        private static final String CONFIG_KEY = "$config";
+
         /**
          * Get the manifest annotations
          *
          * @return The manifest annotations
          */
         public Map<String, String> getManifestAnnotations() {
-            return this.getOrDefault("$manifest", new HashMap<>());
+            return this.getOrDefault(MANIFEST_KEY, new HashMap<>());
         }
 
         /**
@@ -125,7 +128,7 @@ public record Annotations(
          * @return The config annotations
          */
         public Map<String, String> getConfigAnnotations() {
-            return this.getOrDefault("$config", new HashMap<>());
+            return this.getOrDefault(CONFIG_KEY, new HashMap<>());
         }
 
         /**
@@ -135,8 +138,8 @@ public record Annotations(
          */
         public Map<String, Map<String, String>> getFilesAnnotations() {
             return this.entrySet().stream()
-                    .filter(entry -> !"$manifest".equals(entry.getKey())
-                            && !"$config".equals(entry.getKey())) // Filter out $manifest and $config
+                    .filter(entry -> !MANIFEST_KEY.equals(entry.getKey())
+                            && !CONFIG_KEY.equals(entry.getKey())) // Filter out $manifest and $config
                     .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         }
     }
@@ -159,8 +162,8 @@ public record Annotations(
      */
     public String toJson() {
         AnnotationFile file = new AnnotationFile();
-        file.put("$manifest", manifestAnnotations());
-        file.put("$config", configAnnotations());
+        file.put(AnnotationFile.MANIFEST_KEY, manifestAnnotations());
+        file.put(AnnotationFile.CONFIG_KEY, configAnnotations());
         file.putAll(filesAnnotations());
         return JsonUtils.toJson(file);
     }
