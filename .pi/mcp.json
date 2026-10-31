@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "huginn": {
+      "command": "jbang",
+      "args": ["--quiet", "huginn-mcp@maveniverse"]
+    }
+  }
+}

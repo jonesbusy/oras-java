@@ -40,6 +40,8 @@ target/
 # When testing JSON files
 *.json
 !.backportrc.json
+!.mcp.json
+!.pi/mcp.json
 oci/
 !src/test/resources/oci/
 !src/test/resources/oci/**/*.json
