@@ -21,6 +21,7 @@
 package land.oras;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -275,6 +276,253 @@ class RegistryWireMockTest {
                             .withoutHeader("Authorization"));
         } finally {
             redirectTarget.stop();
+        }
+    }
+
+    @Test
+    void shouldRejectForeignBlobUploadLocation(WireMockRuntimeInfo wmRuntimeInfo) {
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        WireMockServer foreignUpload =
+                new WireMockServer(WireMockConfiguration.options().dynamicPort());
+        foreignUpload.start();
+
+        try {
+            wireMock.register(WireMock.head(WireMock.urlPathMatching("/v2/library/foreign-upload/blobs/.*"))
+                    .willReturn(WireMock.notFound()));
+            wireMock.register(WireMock.post(WireMock.urlPathMatching("/v2/library/foreign-upload/blobs/uploads/.*"))
+                    .willReturn(WireMock.aResponse()
+                            .withStatus(202)
+                            .withHeader(
+                                    Const.LOCATION_HEADER,
+                                    "http://127.0.0.1:%d/upload".formatted(foreignUpload.port()))));
+            foreignUpload.stubFor(
+                    WireMock.put(WireMock.urlPathEqualTo("/upload")).willReturn(WireMock.created()));
+
+            Registry registry = Registry.Builder.builder()
+                    .withAuthProvider(authProvider)
+                    .withInsecure(true)
+                    .build();
+            ContainerRef ref = ContainerRef.parse("%s/library/foreign-upload"
+                    .formatted(wmRuntimeInfo.getHttpBaseUrl().replace("http://", "")));
+
+            assertAll(
+                    () -> assertThrows(OrasException.class, () -> registry.pushBlob(ref, "payload".getBytes())),
+                    () -> foreignUpload.verify(
+                            0,
+                            WireMock.putRequestedFor(WireMock.urlPathEqualTo("/upload"))
+                                    .withHeader(Const.AUTHORIZATION_HEADER, WireMock.matching(".+"))));
+        } finally {
+            foreignUpload.stop();
+        }
+    }
+
+    @Test
+    void shouldRejectForeignChunkedPatchLocation(WireMockRuntimeInfo wmRuntimeInfo) throws IOException {
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        WireMockServer foreignUpload =
+                new WireMockServer(WireMockConfiguration.options().dynamicPort());
+        foreignUpload.start();
+
+        try {
+            String repo = "foreign-chunked-upload";
+            wireMock.register(WireMock.head(WireMock.urlPathMatching("/v2/library/%s/blobs/.*".formatted(repo)))
+                    .willReturn(WireMock.notFound()));
+            wireMock.register(WireMock.post(WireMock.urlPathEqualTo("/v2/library/%s/blobs/uploads/".formatted(repo)))
+                    .willReturn(WireMock.aResponse().withStatus(202).withHeader(Const.LOCATION_HEADER, "/session")));
+            wireMock.register(WireMock.patch(WireMock.urlPathEqualTo("/session"))
+                    .willReturn(WireMock.aResponse()
+                            .withStatus(202)
+                            .withHeader(
+                                    Const.LOCATION_HEADER,
+                                    "http://127.0.0.1:%d/upload".formatted(foreignUpload.port()))));
+            foreignUpload.stubFor(
+                    WireMock.patch(WireMock.urlPathEqualTo("/upload")).willReturn(WireMock.status(202)));
+            foreignUpload.stubFor(
+                    WireMock.put(WireMock.urlPathEqualTo("/upload")).willReturn(WireMock.created()));
+
+            Registry registry = Registry.Builder.builder()
+                    .withAuthProvider(authProvider)
+                    .withInsecure(true)
+                    .build();
+            ContainerRef ref = ContainerRef.parse(
+                    "%s/library/%s".formatted(wmRuntimeInfo.getHttpBaseUrl().replace("http://", ""), repo));
+            Path blob = configDir.resolve("foreign-chunked-upload.txt");
+            Files.writeString(blob, "payload");
+
+            assertAll(
+                    () -> assertThrows(OrasException.class, () -> registry.pushBlobChunked(ref, blob, 2L)),
+                    () -> foreignUpload.verify(
+                            0,
+                            WireMock.anyRequestedFor(WireMock.anyUrl())
+                                    .withHeader(Const.AUTHORIZATION_HEADER, WireMock.matching(".+"))));
+        } finally {
+            foreignUpload.stop();
+        }
+    }
+
+    @Test
+    void shouldSendBasicCredentialsOnlyAfterChallenge(WireMockRuntimeInfo wmRuntimeInfo) {
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        String repo = "basic-auth-challenge";
+        String path = "/v2/library/%s/tags/list".formatted(repo);
+        String basic = "Basic bXl1c2VyOm15cGFzcw==";
+        wireMock.register(WireMock.get(WireMock.urlEqualTo(path))
+                .atPriority(1)
+                .withHeader(Const.AUTHORIZATION_HEADER, WireMock.equalTo(basic))
+                .willReturn(WireMock.okJson(JsonUtils.toJson(new Tags(repo, List.of("latest"))))));
+        wireMock.register(WireMock.get(WireMock.urlEqualTo(path))
+                .atPriority(2)
+                .willReturn(
+                        WireMock.unauthorized().withHeader(Const.WWW_AUTHENTICATE_HEADER, "Basic realm=\"registry\"")));
+
+        Registry registry = Registry.Builder.builder()
+                .withAuthProvider(authProvider)
+                .withInsecure(true)
+                .build();
+        ContainerRef ref = ContainerRef.parse(
+                "%s/library/%s".formatted(wmRuntimeInfo.getHttpBaseUrl().replace("http://", ""), repo));
+
+        assertEquals(List.of("latest"), registry.getTags(ref).tags());
+        wireMock.verify(
+                1, WireMock.getRequestedFor(WireMock.urlEqualTo(path)).withoutHeader(Const.AUTHORIZATION_HEADER));
+        wireMock.verify(
+                1,
+                WireMock.getRequestedFor(WireMock.urlEqualTo(path))
+                        .withHeader(Const.AUTHORIZATION_HEADER, WireMock.equalTo(basic)));
+    }
+
+    @Test
+    void shouldNotForwardCredentialsToForeignUploadTokenRealm(WireMockRuntimeInfo wmRuntimeInfo) {
+        WireMockServer foreignUpload =
+                new WireMockServer(WireMockConfiguration.options().dynamicPort());
+        WireMockServer foreignToken =
+                new WireMockServer(WireMockConfiguration.options().dynamicPort());
+        foreignUpload.start();
+        foreignToken.start();
+
+        try {
+            String realm = "http://localhost:%d/token".formatted(foreignToken.port());
+            String challenge =
+                    "Bearer realm=\"%s\",service=\"foreign\",scope=\"repository:library/foreign-upload-token:push\""
+                            .formatted(realm);
+            foreignUpload.stubFor(WireMock.put(WireMock.urlPathEqualTo("/upload"))
+                    .willReturn(WireMock.unauthorized().withHeader(Const.WWW_AUTHENTICATE_HEADER, challenge)));
+            foreignToken.stubFor(WireMock.get(WireMock.urlPathEqualTo("/token"))
+                    .willReturn(WireMock.okJson(JsonUtils.toJson(new HttpClient.TokenResponse(
+                            "foreign-token", null, "foreign", 300, ZonedDateTime.now())))));
+
+            ContainerRef ref = ContainerRef.parse(
+                    "127.0.0.1:%d/library/foreign-upload-token".formatted(wmRuntimeInfo.getHttpPort()));
+            HttpClient client = HttpClient.Builder.builder().build();
+
+            try {
+                client.put(
+                        URI.create("http://localhost:%d/upload".formatted(foreignUpload.port())),
+                        new byte[0],
+                        Map.of(),
+                        Scopes.of(ref),
+                        authProvider);
+            } catch (OrasException ignored) {
+                // Rejecting the foreign challenge is also a safe outcome
+            }
+            assertAll(
+                    () -> foreignUpload.verify(
+                            0,
+                            WireMock.putRequestedFor(WireMock.urlPathEqualTo("/upload"))
+                                    .withHeader(Const.AUTHORIZATION_HEADER, WireMock.matching(".+"))),
+                    () -> foreignToken.verify(
+                            0,
+                            WireMock.getRequestedFor(WireMock.urlPathEqualTo("/token"))
+                                    .withHeader(Const.AUTHORIZATION_HEADER, WireMock.matching(".+"))));
+        } finally {
+            foreignUpload.stop();
+            foreignToken.stop();
+        }
+    }
+
+    @Test
+    void shouldNotForwardRegistryBearerTokenToCrossHostRealm(WireMockRuntimeInfo wmRuntimeInfo) {
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        WireMockServer foreignToken =
+                new WireMockServer(WireMockConfiguration.options().dynamicPort());
+        foreignToken.start();
+
+        try {
+            String repo = "cross-host-bearer-realm";
+            String path = "/v2/library/%s/tags/list".formatted(repo);
+            String realm = "http://localhost:%d/token".formatted(foreignToken.port());
+            String challenge = "Bearer realm=\"%s\",service=\"registry\",scope=\"repository:library/%s:pull\""
+                    .formatted(realm, repo);
+
+            wireMock.register(WireMock.get(WireMock.urlEqualTo(path))
+                    .inScenario("cross-host bearer realm")
+                    .whenScenarioStateIs(Scenario.STARTED)
+                    .willReturn(WireMock.unauthorized().withHeader(Const.WWW_AUTHENTICATE_HEADER, challenge))
+                    .willSetStateTo("token issued"));
+            wireMock.register(WireMock.get(WireMock.urlEqualTo(path))
+                    .inScenario("cross-host bearer realm")
+                    .whenScenarioStateIs("token issued")
+                    .withHeader(Const.AUTHORIZATION_HEADER, WireMock.equalTo("Bearer realm-token"))
+                    .willReturn(WireMock.okJson(JsonUtils.toJson(new Tags(repo, List.of("latest"))))));
+            foreignToken.stubFor(WireMock.get(WireMock.urlPathEqualTo("/token"))
+                    .willReturn(WireMock.okJson(JsonUtils.toJson(
+                            new HttpClient.TokenResponse("realm-token", null, "registry", 300, ZonedDateTime.now())))));
+
+            Registry registry = Registry.Builder.builder()
+                    .withAuthProvider(new BearerTokenProvider("resource-token"))
+                    .withInsecure(true)
+                    .build();
+            ContainerRef ref =
+                    ContainerRef.parse("127.0.0.1:%d/library/%s".formatted(wmRuntimeInfo.getHttpPort(), repo));
+
+            assertEquals(List.of("latest"), registry.getTags(ref).tags());
+            foreignToken.verify(
+                    1,
+                    WireMock.getRequestedFor(WireMock.urlPathEqualTo("/token"))
+                            .withoutHeader(Const.AUTHORIZATION_HEADER));
+        } finally {
+            foreignToken.stop();
+        }
+    }
+
+    @Test
+    void shouldNotForwardCredentialsToLoopbackRegistryRealm(WireMockRuntimeInfo wmRuntimeInfo) {
+        WireMock wireMock = wmRuntimeInfo.getWireMock();
+        WireMockServer foreignToken =
+                new WireMockServer(WireMockConfiguration.options().dynamicPort());
+        foreignToken.start();
+
+        try {
+            String repo = "loopback-registry-realm";
+            String path = "/v2/library/%s/tags/list".formatted(repo);
+            String realm = "http://127.0.0.1:%d/token".formatted(foreignToken.port());
+            String challenge = "Bearer realm=\"%s\",service=\"registry\",scope=\"repository:library/%s:pull\""
+                    .formatted(realm, repo);
+
+            wireMock.register(WireMock.get(WireMock.urlEqualTo(path))
+                    .willReturn(WireMock.unauthorized().withHeader(Const.WWW_AUTHENTICATE_HEADER, challenge)));
+            foreignToken.stubFor(WireMock.get(WireMock.urlPathEqualTo("/token")).willReturn(WireMock.ok()));
+
+            Registry registry = Registry.Builder.builder()
+                    .withAuthProvider(authProvider)
+                    .withInsecure(true)
+                    .build();
+            ContainerRef ref = ContainerRef.parse(
+                    "%s/library/%s".formatted(wmRuntimeInfo.getHttpBaseUrl().replace("http://", ""), repo));
+
+            try {
+                registry.getTags(ref);
+            } catch (OrasException ignored) {
+                // Rejecting the unsafe realm is also a safe outcome
+            }
+            assertAll(
+                    () -> wireMock.verify(1, WireMock.getRequestedFor(WireMock.urlEqualTo(path))),
+                    () -> foreignToken.verify(
+                            0,
+                            WireMock.getRequestedFor(WireMock.urlPathEqualTo("/token"))
+                                    .withHeader(Const.AUTHORIZATION_HEADER, WireMock.matching(".+"))));
+        } finally {
+            foreignToken.stop();
         }
     }
 

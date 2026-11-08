@@ -20,6 +20,8 @@
 
 package land.oras.auth;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.Timer;
@@ -31,9 +33,12 @@ import java.io.InputStream;
 import java.net.CookieManager;
 import java.net.CookiePolicy;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URLEncoder;
+import java.net.UnknownHostException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
@@ -50,6 +55,7 @@ import java.time.ZonedDateTime;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
@@ -90,6 +96,8 @@ public final class HttpClient {
     private static final Pattern WWW_AUTH_VALUE_PATTERN =
             Pattern.compile("Bearer realm=\"([^\"]+)\",service=\"([^\"]+)\",scope=\"([^\"]+)\"(,error=\"([^\"]+)\")?");
 
+    private static final Pattern BASIC_AUTH_VALUE_PATTERN = Pattern.compile("(?i)(?:^|,)\\s*Basic(?:\\s|$)");
+
     /**
      * The HTTP client builder
      */
@@ -102,6 +110,10 @@ public final class HttpClient {
      */
     private java.net.http.HttpClient client;
     // spotless:on
+
+    // Reuse Basic only on an origin that challenged, so stream bodies do not need replay
+    private final Cache<String, Boolean> authenticatedBasicOrigins =
+            Caffeine.newBuilder().maximumSize(TokenCache.MAX_CACHE_SIZE).build();
 
     /**
      * Skip TLS verification
@@ -601,7 +613,13 @@ public final class HttpClient {
      */
     public <T> TokenResponse refreshToken(
             HttpClient.ResponseWrapper<T> response, Scopes scopes, AuthProvider authProvider) {
+        URI registryUri =
+                URI.create("https://%s".formatted(scopes.getContainerRef().getApiRegistry()));
+        return refreshToken(response, scopes, authProvider, registryUri);
+    }
 
+    private <T> TokenResponse refreshToken(
+            HttpClient.ResponseWrapper<T> response, Scopes scopes, AuthProvider authProvider, URI registryUri) {
         String wwwAuthHeader = response.headers().getOrDefault(Const.WWW_AUTHENTICATE_HEADER.toLowerCase(), "");
         LOG.debug("WWW-Authenticate header: {}", wwwAuthHeader);
         if (wwwAuthHeader.isEmpty()) {
@@ -627,9 +645,9 @@ public final class HttpClient {
 
         LOG.debug("WWW-Authenticate header: realm={}, service={}, scope={}, error={}", realm, service, scope, error);
 
+        URI realmUri = validateRealm(registryUri, realm);
         String query = "scope=%s&service=%s".formatted(scope, URLEncoder.encode(service, StandardCharsets.UTF_8));
-
-        URI uri = URI.create(realm + "?" + query);
+        URI uri = URI.create(realmUri + (realmUri.getRawQuery() == null ? "?" : "&") + query);
 
         // Perform the request to get the token (no retry — a failed token request is a hard failure)
         Map<String, String> headers = new HashMap<>();
@@ -670,14 +688,89 @@ public final class HttpClient {
         return token;
     }
 
-    static boolean isSameOrigin(URI uri1, URI uri2) {
-        return Objects.equals(uri1.getScheme(), uri2.getScheme())
-                && Objects.equals(uri1.getHost(), uri2.getHost())
+    static URI validateRealm(URI registryUri, String realm) {
+        URI realmUri;
+        try {
+            realmUri = new URI(realm);
+        } catch (URISyntaxException e) {
+            throw new OrasException("Invalid bearer realm: %s".formatted(realm), e);
+        }
+
+        String scheme = realmUri.getScheme();
+        if (!("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                || realmUri.getHost() == null
+                || realmUri.getUserInfo() != null
+                || realmUri.getFragment() != null) {
+            throw new OrasException("Invalid bearer realm: %s".formatted(realm));
+        }
+        if ("https".equalsIgnoreCase(registryUri.getScheme()) && "http".equalsIgnoreCase(scheme)) {
+            throw new OrasException("Bearer realm must not downgrade an HTTPS registry to HTTP");
+        }
+
+        InetAddress address = parseIpLiteral(realmUri.getHost());
+        if (address != null
+                && isUnsafeAddress(address)
+                && !realmUri.getHost().equalsIgnoreCase(registryUri.getHost())) {
+            throw new OrasException("Bearer realm must not use a loopback, link-local, private, or unspecified IP");
+        }
+        return realmUri;
+    }
+
+    // shortcut: checks IP literals only, add DNS resolution and connection pinning to block private-address hostnames
+    private static InetAddress parseIpLiteral(String host) {
+        String address = host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
+        int zoneIndex = address.indexOf('%');
+        if (zoneIndex >= 0) {
+            address = address.substring(0, zoneIndex);
+        }
+        if (!address.contains(":") && !address.matches("\\d{1,3}(?:\\.\\d{1,3}){3}")) {
+            return null;
+        }
+        try {
+            return InetAddress.getByName(address);
+        } catch (UnknownHostException e) {
+            throw new OrasException("Invalid IP literal in bearer realm: %s".formatted(host), e);
+        }
+    }
+
+    private static boolean isUnsafeAddress(InetAddress address) {
+        byte[] bytes = address.getAddress();
+        return address.isAnyLocalAddress()
+                || address.isLoopbackAddress()
+                || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress()
+                || address.isMCLinkLocal()
+                || (bytes.length == 16 && (bytes[0] & 0xfe) == 0xfc);
+    }
+
+    private static String originKey(URI uri) {
+        return "%s://%s:%d"
+                .formatted(
+                        uri.getScheme().toLowerCase(Locale.ROOT), uri.getHost().toLowerCase(Locale.ROOT), getPort(uri));
+    }
+
+    private static boolean isRegistryOrigin(URI uri, ContainerRef containerRef) {
+        String scheme = uri.getScheme();
+        if (!("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
+            return false;
+        }
+        URI registryUri = URI.create("%s://%s".formatted(scheme, containerRef.getApiRegistry()));
+        return sameHostAndPort(uri, registryUri);
+    }
+
+    private static boolean sameHostAndPort(URI uri1, URI uri2) {
+        return uri1.getHost() != null
+                && uri2.getHost() != null
+                && uri1.getHost().equalsIgnoreCase(uri2.getHost())
                 && getPort(uri1) == getPort(uri2);
     }
 
+    static boolean isSameOrigin(URI uri1, URI uri2) {
+        return Objects.equals(uri1.getScheme(), uri2.getScheme()) && sameHostAndPort(uri1, uri2);
+    }
+
     static int getPort(URI uri) {
-        return uri.getPort() != -1 ? uri.getPort() : ("https".equals(uri.getScheme()) ? 443 : 80);
+        return uri.getPort() != -1 ? uri.getPort() : ("https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80);
     }
 
     static <T> boolean shouldRedirect(HttpResponse<T> response) {
@@ -729,6 +822,7 @@ public final class HttpClient {
         LOG.debug("New scopes: {}", newScopes.getScopes());
         LOG.debug("With identity {}", newScopes.getIdentity());
 
+        boolean registryOrigin = isRegistryOrigin(uri, containerRef);
         int maxAttempts = retryEnabled ? this.maxRetries : 1;
 
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
@@ -736,9 +830,9 @@ public final class HttpClient {
                 HttpRequest.Builder builder = HttpRequest.newBuilder().uri(uri).method(method, bodyPublisher);
 
                 // Check token cache — may be populated by a prior attempt's 401 handling.
-                // Disabled for token-refresh requests (allowCachedToken=false): the token endpoint
-                // must always see the configured AuthProvider credentials, never a resource-server bearer.
-                TokenResponse cachedToken = allowCachedToken ? TokenCache.get(newScopes) : null;
+                // Token-refresh requests do not reuse cached or static bearer tokens.
+                TokenResponse cachedToken =
+                        allowCachedToken && includeAuthHeader && registryOrigin ? TokenCache.get(newScopes) : null;
                 if (cachedToken == null) {
                     LOG.trace("No token found in cache for scopes: {}", newScopes);
                 } else {
@@ -746,11 +840,17 @@ public final class HttpClient {
                 }
 
                 // Add authentication header if any (from provider or cached token)
-                var authHeader = authProvider.getAuthHeader(containerRef);
+                String authHeader = includeAuthHeader && (!allowCachedToken || registryOrigin)
+                        ? authProvider.getAuthHeader(containerRef)
+                        : null;
                 if (cachedToken == null
                         && authHeader != null
                         && !authProvider.getAuthScheme().equals(AuthScheme.NONE)
-                        && includeAuthHeader) {
+                        && includeAuthHeader
+                        && (allowCachedToken
+                                ? authProvider.getAuthScheme() != AuthScheme.BASIC
+                                        || authenticatedBasicOrigins.getIfPresent(originKey(uri)) != null
+                                : authProvider.getAuthScheme() == AuthScheme.BASIC)) {
                     builder = builder.header(Const.AUTHORIZATION_HEADER, authHeader);
                 } else if (cachedToken != null && includeAuthHeader) {
                     builder = builder.header(Const.AUTHORIZATION_HEADER, "Bearer " + cachedToken.getEffectiveToken());
@@ -803,7 +903,16 @@ public final class HttpClient {
                     continue;
                 }
 
-                return redoRequest(uri, response, builder, body, handler, newScopes, authProvider);
+                return redoRequest(
+                        uri,
+                        response,
+                        builder,
+                        body,
+                        handler,
+                        newScopes,
+                        authProvider,
+                        includeAuthHeader,
+                        allowCachedToken);
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -895,25 +1004,48 @@ public final class HttpClient {
             byte[] body,
             HttpResponse.BodyHandler<T> handler,
             Scopes scopes,
-            AuthProvider authProvider) {
-        if ((response.statusCode() == 401 || response.statusCode() == 403)) {
-            LOG.debug("Requesting new token...");
-            HttpClient.TokenResponse token =
-                    refreshToken(toResponseWrapper(response, scopes.getService()), scopes, authProvider);
-            if (token.issued_at() != null && token.expires_in() != null) {
-                LOG.debug(
-                        "Received token issued_at {}, expire_id {} and expiring at {} ",
-                        token.issued_at(),
-                        token.expires_in(),
-                        token.issued_at().plusSeconds(token.expires_in()));
+            AuthProvider authProvider,
+            boolean includeAuthHeader,
+            boolean allowAuthRefresh) {
+        if ((response.statusCode() == 401 || response.statusCode() == 403)
+                && includeAuthHeader
+                && allowAuthRefresh
+                && isRegistryOrigin(originUri, scopes.getContainerRef())) {
+            String wwwAuthHeader =
+                    response.headers().firstValue(Const.WWW_AUTHENTICATE_HEADER).orElse("");
+            String authorization;
+            String service;
+            boolean basicChallenge = false;
+            if (authProvider.getAuthScheme() == AuthScheme.BASIC
+                    && BASIC_AUTH_VALUE_PATTERN.matcher(wwwAuthHeader).find()) {
+                authorization = authProvider.getAuthHeader(scopes.getContainerRef());
+                if (authorization == null) {
+                    throw new OrasException(response.statusCode(), "Invalid WWW-Authenticate header");
+                }
+                service = scopes.getService();
+                basicChallenge = true;
+            } else {
+                LOG.debug("Requesting new token...");
+                HttpClient.TokenResponse token =
+                        refreshToken(toResponseWrapper(response, scopes.getService()), scopes, authProvider, originUri);
+                if (token.issued_at() != null && token.expires_in() != null) {
+                    LOG.debug(
+                            "Received token issued_at {}, expire_id {} and expiring at {} ",
+                            token.issued_at(),
+                            token.expires_in(),
+                            token.issued_at().plusSeconds(token.expires_in()));
+                }
+                authorization = "Bearer " + token.getEffectiveToken();
+                service = token.service();
             }
-            String bearerToken = token.getEffectiveToken();
-            String service = token.service();
             try {
-                builder = builder.setHeader(Const.AUTHORIZATION_HEADER, "Bearer " + bearerToken);
+                builder = builder.setHeader(Const.AUTHORIZATION_HEADER, authorization);
                 HttpRequest request = builder.build();
                 logRequest(request, body);
                 HttpResponse<T> newResponse = executeAndRecordRequest(request, handler);
+                if (basicChallenge && newResponse.statusCode() != 401 && newResponse.statusCode() != 403) {
+                    authenticatedBasicOrigins.put(originKey(originUri), Boolean.TRUE);
+                }
 
                 // Follow redirect
                 if (shouldRedirect(newResponse)) {
@@ -1061,7 +1193,7 @@ public final class HttpClient {
          * @return The effective token, which is either the access_token or the token field depending on which one is present
          */
         public String getEffectiveToken() {
-            return access_token != null ? access_token : token;
+            return access_token != null && !access_token.isBlank() ? access_token : token;
         }
 
         @Override

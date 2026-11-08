@@ -920,14 +920,9 @@ public final class Registry extends OCI<ContainerRef> {
         // We need to push via PUT
         if (response.statusCode() == 202) {
             String location = response.headers().get(Const.LOCATION_HEADER.toLowerCase());
-            // Ensure location is absolute URI
-            if (!location.startsWith("http") && !location.startsWith("https")) {
-                location =
-                        "%s://%s/%s".formatted(getScheme(), ref.getApiRegistry(this), location.replaceFirst("^/", ""));
-            }
-            LOG.debug("Location header: {}", location);
-
-            URI uploadURI = createLocationWithDigest(location, digest);
+            URI uploadURI = createLocationWithDigest(
+                    resolveUploadLocation(ref, location).toString(), digest);
+            LOG.debug("Location header: {}", uploadURI);
 
             response = client.upload(
                     "PUT",
@@ -977,13 +972,9 @@ public final class Registry extends OCI<ContainerRef> {
             throw new OrasException("Failed to initiate blob upload: %s".formatted(response.response()));
         }
         String location = response.headers().get(Const.LOCATION_HEADER.toLowerCase());
-        // Ensure location is absolute URI
-        if (!location.startsWith("http") && !location.startsWith("https")) {
-            location = "%s://%s/%s".formatted(getScheme(), ref.getApiRegistry(this), location.replaceFirst("^/", ""));
-        }
-        LOG.debug("Location header: {}", location);
-
-        URI uploadURI = createLocationWithDigest(location, digest);
+        URI uploadURI = createLocationWithDigest(
+                resolveUploadLocation(containerRef, location).toString(), digest);
+        LOG.debug("Location header: {}", uploadURI);
 
         response = client.upload(
                 uploadURI,
@@ -1037,15 +1028,10 @@ public final class Registry extends OCI<ContainerRef> {
         // We need to push via PUT
         if (response.statusCode() == 202) {
             String location = response.headers().get(Const.LOCATION_HEADER.toLowerCase());
-            // Ensure location is absolute URI
-            if (!location.startsWith("http") && !location.startsWith("https")) {
-                location =
-                        "%s://%s/%s".formatted(getScheme(), ref.getApiRegistry(this), location.replaceFirst("^/", ""));
-            }
+            URI uploadURI = createLocationWithDigest(
+                    resolveUploadLocation(ref, location).toString(), digest);
 
-            URI uploadURI = createLocationWithDigest(location, digest);
-
-            LOG.debug("Location header: {}", location);
+            LOG.debug("Location header: {}", uploadURI);
             response = client.put(
                     uploadURI,
                     data,
@@ -1147,12 +1133,9 @@ public final class Registry extends OCI<ContainerRef> {
             throw new OrasException(
                     "Failed to initiate chunked blob upload: status %d".formatted(response.statusCode()));
         }
-        String location = response.headers().get(Const.LOCATION_HEADER.toLowerCase());
-        if (!location.startsWith("http://") && !location.startsWith("https://")) {
-            location = "%s://%s/%s".formatted(getScheme(), ref.getApiRegistry(this), location.replaceFirst("^/", ""));
-        }
+        URI location = resolveUploadLocation(ref, response.headers().get(Const.LOCATION_HEADER.toLowerCase()));
         LOG.debug("Chunked upload session location: {}", location);
-        return location;
+        return location.toString();
     }
 
     private String uploadChunks(ContainerRef ref, InputStream stream, long totalSize, long chunkSize, String location) {
@@ -1189,11 +1172,7 @@ public final class Registry extends OCI<ContainerRef> {
                 // The registry MAY return a new location after each PATCH
                 String newLocation = patchResponse.headers().get(Const.LOCATION_HEADER.toLowerCase());
                 if (newLocation != null && !newLocation.isBlank()) {
-                    if (!newLocation.startsWith("http://") && !newLocation.startsWith("https://")) {
-                        newLocation = "%s://%s/%s"
-                                .formatted(getScheme(), ref.getApiRegistry(this), newLocation.replaceFirst("^/", ""));
-                    }
-                    location = newLocation;
+                    location = resolveUploadLocation(ref, newLocation).toString();
                     LOG.debug("Chunked upload location updated: {}", location);
                 }
                 offset += read;
@@ -1206,7 +1185,8 @@ public final class Registry extends OCI<ContainerRef> {
     }
 
     private void finalizeChunkedUpload(ContainerRef ref, String location, String digest) {
-        URI putUri = createLocationWithDigest(location, digest);
+        URI putUri =
+                createLocationWithDigest(resolveUploadLocation(ref, location).toString(), digest);
         HttpClient.ResponseWrapper<String> putResponse = client.put(
                 putUri,
                 new byte[0],
@@ -1243,7 +1223,7 @@ public final class Registry extends OCI<ContainerRef> {
         HttpClient.ResponseWrapper<String> response = client.head(
                 uri,
                 Map.of(Const.ACCEPT_HEADER, Const.APPLICATION_OCTET_STREAM_HEADER_VALUE),
-                Scopes.of(containerRef),
+                Scopes.of(ref),
                 authProvider);
         logResponse(response);
         return response;
@@ -1760,6 +1740,42 @@ public final class Registry extends OCI<ContainerRef> {
         } catch (IOException e) {
             throw new OrasException("Failed to pull artifact", e);
         }
+    }
+
+    private URI resolveUploadLocation(ContainerRef ref, String location) {
+        if (location == null || location.isBlank()) {
+            throw new OrasException("Missing blob upload Location header");
+        }
+
+        URI registryUri = URI.create("%s://%s".formatted(getScheme(), ref.getApiRegistry(this)));
+        URI uploadUri;
+        try {
+            URI locationUri = new URI(location);
+            uploadUri = locationUri.isAbsolute() ? locationUri : registryUri.resolve(locationUri);
+        } catch (URISyntaxException e) {
+            throw new OrasException("Invalid blob upload Location: %s".formatted(location), e);
+        }
+
+        String scheme = uploadUri.getScheme();
+        if (!("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                || uploadUri.getHost() == null
+                || uploadUri.getUserInfo() != null
+                || uploadUri.getFragment() != null) {
+            throw new OrasException("Invalid blob upload Location: %s".formatted(location));
+        }
+        if (!sameUploadHostAndPort(uploadUri, registryUri)
+                || ("https".equalsIgnoreCase(registryUri.getScheme()) && "http".equalsIgnoreCase(scheme))) {
+            throw new OrasException("Blob upload Location must use the registry host and port");
+        }
+        return uploadUri;
+    }
+
+    private static boolean sameUploadHostAndPort(URI uri1, URI uri2) {
+        return uri1.getHost().equalsIgnoreCase(uri2.getHost()) && getPort(uri1) == getPort(uri2);
+    }
+
+    private static int getPort(URI uri) {
+        return uri.getPort() != -1 ? uri.getPort() : ("https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80);
     }
 
     /**

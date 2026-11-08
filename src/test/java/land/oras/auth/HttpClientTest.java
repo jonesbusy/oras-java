@@ -55,6 +55,13 @@ class HttpClientTest {
     }
 
     @Test
+    void shouldFallBackToTokenWhenAccessTokenIsEmpty() {
+        HttpClient.TokenResponse response = new HttpClient.TokenResponse("token-value", "", null, null, null);
+
+        assertEquals("token-value", response.getEffectiveToken());
+    }
+
+    @Test
     void testIsSameOriginSame() {
         URI uri1 = URI.create("https://example.com:443/path");
         URI uri2 = URI.create("https://example.com/path2");
@@ -80,6 +87,35 @@ class HttpClientTest {
         URI uri1 = URI.create("http://example.com");
         URI uri2 = URI.create("http://example.org");
         assertFalse(HttpClient.isSameOrigin(uri1, uri2));
+    }
+
+    @Test
+    void shouldAcceptPublicCrossHostBearerRealm() {
+        URI registry = URI.create("https://registry.example.com/v2/");
+        URI realm = HttpClient.validateRealm(registry, "https://auth.example.com/token");
+
+        assertEquals("auth.example.com", realm.getHost());
+    }
+
+    @Test
+    void shouldRejectHttpBearerRealmForHttpsRegistry() {
+        URI registry = URI.create("https://registry.example.com/v2/");
+
+        assertThrows(OrasException.class, () -> HttpClient.validateRealm(registry, "http://auth.example.com/token"));
+    }
+
+    @Test
+    void shouldRejectLoopbackBearerRealmForDifferentRegistryHost() {
+        URI registry = URI.create("http://registry.example.com/v2/");
+
+        assertThrows(OrasException.class, () -> HttpClient.validateRealm(registry, "http://127.0.0.1:8080/token"));
+    }
+
+    @Test
+    void shouldAllowLoopbackBearerRealmForSameRegistryHost() {
+        URI registry = URI.create("http://127.0.0.1:5000/v2/");
+
+        assertDoesNotThrow(() -> HttpClient.validateRealm(registry, "http://127.0.0.1:8080/token"));
     }
 
     @Test
