@@ -65,6 +65,18 @@ class OCILayoutTest {
     private final ZotContainer registry = new ZotContainer().withStartupAttempts(3);
 
     @Test
+    void shouldUseDaemonThreadsForExecutor() throws Exception {
+        OCILayout ociLayout = OCILayout.Builder.builder()
+                .defaults(layoutPath.resolve("daemon"))
+                .build();
+        Boolean daemon = ociLayout
+                .getExecutorService()
+                .submit(() -> Thread.currentThread().isDaemon())
+                .get();
+        assertTrue(daemon, "Executor threads must be daemon to not keep the JVM alive");
+    }
+
+    @Test
     void shouldPushEmptyManifest() {
         Path path = layoutPath.resolve("shouldPushManifest");
         LayoutRef layoutRef = LayoutRef.parse("%s".formatted(path.toString()));

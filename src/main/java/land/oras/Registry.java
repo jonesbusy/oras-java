@@ -410,6 +410,7 @@ public final class Registry extends OCI<ContainerRef> {
             executorService = Executors.newFixedThreadPool(maxConcurrentDownloads, r -> {
                 Thread t = new Thread(r);
                 t.setName("layer-transfer-worker-%d".formatted(t.getId()));
+                t.setDaemon(true);
                 return t;
             });
         }

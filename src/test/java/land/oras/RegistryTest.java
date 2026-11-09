@@ -81,6 +81,15 @@ class RegistryTest {
     }
 
     @Test
+    void shouldUseDaemonThreadsForDefaultExecutor() throws Exception {
+        Registry registry = Registry.builder().build();
+        Boolean daemon = registry.getExecutorService()
+                .submit(() -> Thread.currentThread().isDaemon())
+                .get();
+        assertTrue(daemon, "Default executor threads must be daemon to not keep the JVM alive");
+    }
+
+    @Test
     @Execution(ExecutionMode.SAME_THREAD)
     @ResourceLock(EnvironmentLock.SYSTEM_ENVIRONMENT)
     void shouldThrowIfUnableToFindOnAnyUnQualifiedSearchRegistry(@TempDir Path homeDir) throws Exception {

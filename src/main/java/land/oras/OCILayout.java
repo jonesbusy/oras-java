@@ -54,7 +54,12 @@ public final class OCILayout extends OCI<LayoutRef> {
     @SuppressWarnings("all")
     private final String imageLayoutVersion = "1.0.0";
 
-    private final ExecutorService executors = Executors.newSingleThreadExecutor();
+    private final ExecutorService executors = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r);
+        t.setName("layout-transfer-worker-%d".formatted(t.getId()));
+        t.setDaemon(true);
+        return t;
+    });
 
     /**
      * Path on the file system of the OCI Layout
