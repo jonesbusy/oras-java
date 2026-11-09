@@ -36,3 +36,12 @@ brew install docker-credential-helper
 - Javadoc is well formatted for public methods. If not the build will fail
 - Coverage on new code is at least `80%`. You can check jacoco reports in `target/site/jacoco/index.html`
 - Pull request template is filled with the correct information (Specially the testing done section)
+
+### Snapshots and releases
+
+SNAPSHOTs are deployed automatically on every push to `main` (see [deploy-snapshots.yml](.github/workflows/deploy-snapshots.yml)).
+
+To release:
+
+- Check that the draft release version matches the version in `pom.xml`, especially when bumping the major or minor version. Patch versions are updated automatically.
+- Run the [release workflow](.github/workflows/release.yml).

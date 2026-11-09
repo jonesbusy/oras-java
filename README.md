@@ -1,6 +1,10 @@
-# ORAS Java
+<div align="center">
 
-[![GitHub Workflow Status](https://github.com/oras-project/oras-java/actions/workflows/build.yml/badge.svg)](https://github.com/oras-project/oras-java/actions/workflows/build.yml)
+<a href="https://oras.land/"><img src="https://oras.land/img/oras.svg" alt="ORAS logo" width="160px"></a>
+
+# ORAS Java SDK
+
+[![Build](https://github.com/oras-project/oras-java/actions/workflows/build.yml/badge.svg)](https://github.com/oras-project/oras-java/actions/workflows/build.yml)
 [![codecov](https://codecov.io/gh/oras-project/oras-java/branch/main/graph/badge.svg)](https://codecov.io/gh/oras-project/oras-java)
 ![GitHub Release](https://img.shields.io/github/v/release/oras-project/oras-java?logo=github&color=green)
 [![GitHub license](https://img.shields.io/github/license/oras-project/oras-java)](https://github.com/oras-project/oras-java/blob/main/LICENSE)
@@ -9,26 +13,25 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/10047/badge)](https://www.bestpractices.dev/projects/10047)
 [![Reproducible Central Artifact](https://img.shields.io/reproducible-central/artifact/land.oras/oras-java-sdk/0.2.15)](https://github.com/jvm-repo-rebuild/reproducible-central/blob/master/content/land/oras/oras-java-sdk/README.md)
 
+Push and pull OCI artifacts from Java.
+
+[Install](#install) · [Examples](#examples) · [Registries configuration](#registries-configuration) · [Trust policy](#trust-policy) · [Javadoc](https://oras-project.github.io/oras-java/)
+
+</div>
+
+[ORAS](https://oras.land/) (OCI Registry as Storage) lets you store any file in an [OCI-conformant](https://github.com/opencontainers/oci-conformance) registry, not just container images. This SDK brings that to Java applications. It can:
+
+- push and pull files and directories as OCI artifacts
+- attach signatures, SBOMs or other artifacts to an existing one through the Referrers API
+- copy artifacts between registries and to or from a local [OCI image layout](https://github.com/opencontainers/image-spec/blob/main/image-layout.md) (directory or tar)
+- reuse your Docker or Podman credentials, `registries.conf` and `policy.json`, including Sigstore signature verification
 
 > [!WARNING]
-> The Oras Java SDK is currently in **preview** state.
->
-> It's configuration and APIs might change in future releases
+> The SDK is in **preview**. Configuration and APIs may still change between releases.
 
-<p align="left">
-<a href="https://oras.land/"><img src="https://oras.land/img/oras.svg" alt="banner" width="200px"></a>
-</p>
+## Install
 
-OCI Registry as Storage enables libraries to push OCI Artifacts to [OCI Conformant](https://github.com/opencontainers/oci-conformance) registries. This is a Java SDK for Java developers to empower them to do this in their applications.
-
-## Consuming SDK
-
-SNAPSHOT for version 0.2.x are published on GitHub Maven packages.
-SNAPSHOT for version 0.3.x and above are published on Maven Central at: https://central.sonatype.com/repository/maven-snapshots/
-
-Releases are published on Maven Central since version 0.2.x.
-
-Javadoc is published from main branch into: https://oras-project.github.io/oras-java/
+Releases are published to Maven Central. Requires Java 17 or later.
 
 ```xml
 <dependency>
@@ -38,15 +41,12 @@ Javadoc is published from main branch into: https://oras-project.github.io/oras-
 </dependency>
 ```
 
-### Quarkus
+Using Quarkus? The [`quarkus-oras`](https://docs.quarkiverse.io/quarkus-oras/dev/index.html) extension wraps this SDK.
 
-Quarkus users can use the extension `quarkus-oras` to use the SDK in their applications.
+<details>
+<summary>Using SNAPSHOT builds</summary>
 
-Follow the [Quarkus ORAS documentation](https://docs.quarkiverse.io/quarkus-oras/dev/index.html#) to get started with Quarkus.
-
-### Only for SNAPSHOTS (only for testing)
-
-Then on your `pom.xml`
+Every commit on `main` publishes a SNAPSHOT to the Maven Central snapshots repository. Use them for testing only.
 
 ```xml
 <repositories>
@@ -64,23 +64,27 @@ Then on your `pom.xml`
 </repositories>
 ```
 
+</details>
+
 ## Examples
 
 ### Authentication
 
-Using existing credentials from `~/.docker/config.json` or `$XDG_RUNTIME_DIR/containers/auth.json`:
+Reuse the credentials from `~/.docker/config.json` or `$XDG_RUNTIME_DIR/containers/auth.json`:
 
 ```java
 Registry registry = Registry.builder().defaults().build();
 ```
 
-Using a username and password:
+Or pass a username and password:
 
 ```java
 Registry registry = Registry.builder().defaults("username", "password").build();
 ```
 
-### Push a single file
+The examples below use `insecure()` because they target a local registry over plain HTTP. Drop it for real registries.
+
+### Push a file
 
 ```java
 Registry registry = Registry.builder().insecure().build();
@@ -88,9 +92,9 @@ LocalPath artifact = LocalPath.of(Path.of("my-file.txt"));
 Manifest manifest = registry.pushArtifact(ContainerRef.parse("localhost:5000/hello:v1"), artifact);
 ```
 
-### Push multiple files with a custom artifact type
+### Push several files with a custom artifact type
 
-Push several files at once with a custom artifact type, per-file media types, and manifest-level annotations:
+Each file becomes one layer, named after the file through the `org.opencontainers.image.title` annotation. You can set a media type per file and add annotations to the manifest or to individual files:
 
 ```java
 Registry registry = Registry.builder().insecure().build();
@@ -106,13 +110,9 @@ Manifest manifest = registry.pushArtifact(
         LocalPath.of(Path.of("target/app.jar"), "application/java-archive"));
 ```
 
-The resulting manifest will contain one layer per file, each annotated with its filename via `org.opencontainers.image.title`.
-
 ### Push a directory
 
-Directories are automatically compressed as a `tar+gzip` archive and tagged with
-`org.opencontainers.image.title` set to the directory name. The `io.deis.oras.content.unpack`
-annotation is set to `true` so the SDK automatically extracts the archive on pull.
+A directory is packed into a `tar+gzip` layer titled with the directory name. The SDK also sets `io.deis.oras.content.unpack=true`, so pulling the artifact extracts it again.
 
 ```java
 Registry registry = Registry.builder().insecure().build();
@@ -121,7 +121,7 @@ Manifest manifest = registry.pushArtifact(
         LocalPath.of(Path.of("config-dir")));
 ```
 
-To push a directory as a plain zip instead:
+To push it as a zip instead, give the media type:
 
 ```java
 Manifest manifest = registry.pushArtifact(
@@ -131,8 +131,7 @@ Manifest manifest = registry.pushArtifact(
 
 ### Pull an artifact
 
-Files are automatically written using the `org.opencontainers.image.title` layer annotation as the filename.
-The third argument controls whether existing files are overwritten:
+Files are written using their `org.opencontainers.image.title` annotation as the file name. The last argument says whether to overwrite existing files.
 
 ```java
 Registry registry = Registry.builder().insecure().build();
@@ -141,47 +140,40 @@ registry.pullArtifact(ContainerRef.parse("localhost:5000/hello:v1"), Path.of("ou
 
 ### Attach an artifact (referrers)
 
-Attach a signature or attestation to an already-pushed artifact. The attached manifest references the
-original via its `subject` field and is discoverable through the [Referrers API](https://github.com/opencontainers/distribution-spec/blob/main/spec.md#listing-referrers):
+Attached artifacts, like a signature or an attestation, point at the original manifest through their `subject` field. Clients find them with the [Referrers API](https://github.com/opencontainers/distribution-spec/blob/main/spec.md#listing-referrers).
 
 ```java
 Registry registry = Registry.builder().insecure().build();
 ContainerRef ref = ContainerRef.parse("localhost:5000/my-app:v1");
 
-// Push the main artifact first
 Manifest manifest = registry.pushArtifact(ref,
         ArtifactType.from("application/vnd.maven+type"),
         LocalPath.of(Path.of("pom.xml"), "application/xml"));
 
-// Attach a signature as a referrer
 Manifest signatureManifest = registry.attachArtifact(
         ref,
         ArtifactType.from("application/vnd.example.signature"),
         LocalPath.of(Path.of("pom.xml.asc")));
 
-// List all referrers for the artifact
 Referrers referrers = registry.getReferrers(
         ref.withDigest(manifest.getDescriptor().getDigest()), null);
 ```
 
-### Assemble a manifest from individual blobs
+### Build a manifest from individual blobs
 
-For fine-grained control, push blobs and configs individually before assembling and pushing the manifest:
+When `pushArtifact` is too high-level, push the blobs and config yourself and assemble the manifest:
 
 ```java
 Registry registry = Registry.builder().insecure().build();
 ContainerRef ref = ContainerRef.parse("localhost:5000/my-app:v1");
 
-// Push individual layers
 Layer layer1 = registry.pushBlob(ref, Files.readAllBytes(Path.of("schema.json")))
         .withAnnotations(Map.of(Const.ANNOTATION_TITLE, "schema.json"));
 Layer layer2 = registry.pushBlob(ref, Files.readAllBytes(Path.of("data.csv")))
         .withAnnotations(Map.of(Const.ANNOTATION_TITLE, "data.csv"));
 
-// Push a custom config
 Config config = registry.pushConfig(ref, Config.empty().withMediaType("application/vnd.example.config+json"));
 
-// Assemble and push the manifest
 Manifest manifest = Manifest.empty()
         .withConfig(config)
         .withLayers(List.of(layer1, layer2));
@@ -190,57 +182,45 @@ registry.pushManifest(ref, manifest);
 
 ### Copy between registries
 
-Copy a tagged artifact — including all its blobs — from one registry to another:
+Copies the manifest and all its blobs:
 
 ```java
 Registry source = Registry.builder().defaults("user", "pass").insecure().build();
 Registry target = Registry.builder().defaults("user", "pass").build();
 
 ContainerRef from = ContainerRef.parse("localhost:5000/my-app:v1");
-ContainerRef to   = ContainerRef.parse("registry.example.com/my-app:v1");
+ContainerRef to = ContainerRef.parse("registry.example.com/my-app:v1");
 
 CopyUtils.copy(source, from, target, to, CopyUtils.CopyOptions.shallow());
 ```
 
-### OCI Layout
+### OCI image layout
 
-OCI Layout lets you work with artifacts stored on disk in the [OCI Image Layout](https://github.com/opencontainers/image-spec/blob/main/image-layout.md) format.
-
-**Push to an OCI Layout directory:**
+`OCILayout` has the same push and pull API as `Registry`, but reads and writes an [OCI image layout](https://github.com/opencontainers/image-spec/blob/main/image-layout.md) on disk.
 
 ```java
 LayoutRef ref = LayoutRef.parse("/tmp/my-layout:latest");
 OCILayout ociLayout = OCILayout.Builder.builder().defaults(Path.of("/tmp/my-layout")).build();
 
-Manifest manifest = ociLayout.pushArtifact(
+// Push
+ociLayout.pushArtifact(
         ref,
         ArtifactType.from("application/vnd.example.type"),
         Annotations.empty(),
         LocalPath.of(Path.of("my-file.txt"), "text/plain"));
-```
 
-**Pull from an OCI Layout directory:**
-
-```java
-LayoutRef ref = LayoutRef.parse("/tmp/my-layout:latest");
-OCILayout ociLayout = OCILayout.Builder.builder().defaults(Path.of("/tmp/my-layout")).build();
+// Pull
 ociLayout.pullArtifact(ref, Path.of("output-dir"), false);
 ```
 
-**Tar-backed OCI Layout** (single-file, portable archive):
+Point it at a `.tar` path to get a single portable archive instead of a directory. The API doesn't change:
 
 ```java
 LayoutRef ref = LayoutRef.parse("/tmp/my-layout.tar:latest");
 OCILayout ociLayout = OCILayout.Builder.builder().defaults(Path.of("/tmp/my-layout.tar")).build();
-
-ociLayout.pushArtifact(ref, ArtifactType.from("application/vnd.example.type"),
-        Annotations.empty(), LocalPath.of(Path.of("my-file.txt"), "text/plain"));
-
-// Pull from the same tar
-ociLayout.pullArtifact(ref, Path.of("output-dir"), false);
 ```
 
-**Copy from OCI Layout to a registry:**
+`CopyUtils` also works between a layout and a registry:
 
 ```java
 LayoutRef layoutRef = LayoutRef.parse("/tmp/my-layout:latest");
@@ -254,24 +234,21 @@ CopyUtils.copy(ociLayout, layoutRef, registry, target, CopyUtils.CopyOptions.sha
 
 ## Registries configuration
 
-Since version `0.7.0` the ORAS Java SDK supports the `registries.conf` format
-(see the [containers/image documentation](https://github.com/containers/image/blob/main/docs/containers-registries.conf.5.md)).
-
-The SDK reads configuration from the following locations, in order (later entries override earlier ones):
+Since `0.7.0` the SDK reads [`registries.conf`](https://github.com/containers/image/blob/main/docs/containers-registries.conf.5.md), the same file Podman, Skopeo and Buildah use. Files are loaded in this order, and later ones override earlier ones:
 
 1. `/etc/containers/registries.conf`
 2. `/etc/containers/registries.conf.d/*.conf` (alphabetical)
 3. `$HOME/.config/containers/registries.conf`
 4. `$HOME/.config/containers/registries.conf.d/*.conf` (alphabetical)
 
-### Supported features
+Supported settings:
 
 ```toml
-# Short-name resolution mode (enforcing is the default)
+# Short-name resolution (enforcing is the default)
 short-name-mode = "enforcing"
 unqualified-search-registries = ["docker.io"]
 
-# Rewrite a location via a prefix
+# Rewrite a prefix to another location
 [[registry]]
 prefix = "docker.io/bitnami"
 location = "docker.io/bitnamilegacy"
@@ -281,16 +258,16 @@ location = "docker.io/bitnamilegacy"
 prefix = "gcr.io"
 blocked = true
 
-# Mark a registry as insecure
+# Use plain HTTP
 [[registry]]
 location = "localhost:5000"
 insecure = true
 
-# Mirrors — tried in order before falling back to the upstream registry
+# Mirrors, tried in order before falling back to the upstream registry
 [[registry]]
 prefix = "registry.example.com"
 location = "registry.example.com"
-mirror-by-digest-only = false   # set to true to restrict all mirrors to digest-only pulls
+mirror-by-digest-only = false   # true restricts every mirror to digest pulls
 
   [[registry.mirror]]
   location = "mirror1.example.com"
@@ -303,90 +280,63 @@ mirror-by-digest-only = false   # set to true to restrict all mirrors to digest-
   pull-from-mirror = "digest-only"
 ```
 
-### Resolution and evaluation order
+### How references are resolved
 
-Reference resolution always happens **before** any security decision, and every
-security decision is evaluated against the **effective (resolved) reference** — not
-the reference originally supplied. For each operation the SDK:
+For every operation the SDK first resolves the reference, then applies security checks, then connects:
 
-1. **Resolves** the reference: short-name / unqualified-search expansion (e.g.
-   `nginx` → `docker.io/library/nginx`), `prefix` → `location` rewrites, and mirror
-   selection.
-2. **Evaluates** `blocked`, `insecure` (HTTP vs HTTPS) and the trust policy against
-   that resolved reference.
-3. **Connects** and transfers bytes.
+1. Resolve: expand short names (`nginx` becomes `docker.io/library/nginx`), apply `prefix` → `location` rewrites and pick a mirror.
+2. Check: apply `blocked`, `insecure` and the trust policy to the resolved reference.
+3. Connect.
 
-This ordering is intentional: block-list and plaintext decisions must bind to the
-host the request actually reaches. Evaluating them on the pre-rewrite reference
-would let a mirror or alias redirect traffic to a blocked or plaintext host while
-the check passed on the original name. `registries.conf` and `policy.json` are
-trusted operator-controlled configuration; a threat model in which an attacker can
-edit those files is out of scope (that host is already compromised).
+The checks run on the host the request will actually reach, not on the name you passed in. Otherwise a mirror or alias could send traffic to a blocked or plain-HTTP host while the check passed on the original name. `registries.conf` and `policy.json` are treated as trusted operator configuration. If an attacker can edit them, the host is already compromised.
 
-Two consequences worth noting:
+This has two consequences:
 
-- **Policy scope is repository-level.** The `policy.json` format scopes rules to
-  `registry[/namespace/repository]` only — tags and digests are stripped before
-  matching. A policy rule *cannot* protect (or single out) a specific tag or digest.
-- **The trust policy is a pull-time gate.** Manifest/index *pulls* are verified
-  against the policy; *deletes* are only checked against `blocked`/`insecure`, never
-  content-verified. Protecting a specific digest from deletion must be enforced by
-  registry-side RBAC / tag immutability, not by the client trust policy.
+- Policies are scoped to repositories. `policy.json` matches `registry[/namespace/repository]` and ignores tags and digests, so you can't write a rule for a single tag or digest.
+- The trust policy is only checked on pulls. Deletes are checked against `blocked` and `insecure` but not verified. To protect a digest from deletion, use registry-side RBAC or tag immutability.
 
 ## Trust policy
 
-The ORAS Java SDK can enforce a containers trust policy when pulling, using the
-[`policy.json`](https://man.archlinux.org/man/containers-policy.json.5.en) format used by Podman,
-Skopeo and Buildah.
-
-The policy is loaded from the following locations, in order (the first that exists wins):
+The SDK can verify pulls against a [`policy.json`](https://man.archlinux.org/man/containers-policy.json.5.en) trust policy, the format Podman, Skopeo and Buildah use. The first file found wins:
 
 1. `$HOME/.config/containers/policy.json`
 2. `/etc/containers/policy.json`
 
-If no policy file is found, an **accept-all** policy is used. You can also set it explicitly:
+Without a policy file, everything is accepted. You can also set the policy in code:
 
 ```java
-// Load from a specific file
+// From a file
 Registry registry = Registry.builder()
         .defaults()
         .withPolicy(Path.of("/etc/containers/policy.json"))
         .build();
 
-// Or build one programmatically
+// Or programmatically
 Registry registry = Registry.builder()
         .defaults()
         .withPolicy(ContainersPolicy.rejectAll())
         .build();
 ```
 
-When a policy is set, every manifest/index pull is evaluated against it and rejected
-(`OrasException`) if it does not pass.
+Every manifest or index pull is checked against the policy. A pull that fails throws an `OrasException`.
 
-### Supported requirement types
-
-| Type                     | Supported | Behaviour                                                          |
-|--------------------------|-----------|--------------------------------------------------------------------|
-| `insecureAcceptAnything` | ✅        | Accept the image without any verification (trust all).             |
-| `reject`                 | ✅        | Reject the image unconditionally.                                  |
-| `sigstoreSigned`         | ✅        | Accept only images with a valid keyed Sigstore (cosign) signature. |
-| `signedBy` (GPG)         | ❌        | Not implemented. Legacy                                            |
+| Requirement type         | Supported | Behavior                                                    |
+|--------------------------|-----------|-------------------------------------------------------------|
+| `insecureAcceptAnything` | Yes       | Accept without verification.                                |
+| `reject`                 | Yes       | Always reject.                                              |
+| `sigstoreSigned`         | Yes       | Accept only images signed with the given Sigstore (cosign) key. |
+| `signedBy` (GPG)         | No        | Legacy, not implemented.                                    |
 
 ### `sigstoreSigned`
 
-Only **keyed** verification is supported for now. If `keyPath` or `keyData` is present it contains a single
-Sigstore public key (the `cosign.pub` produced by `cosign generate-key-pair`), and only signatures
-made by that key are accepted:
+Only keyed verification is supported. Give a single Sigstore public key (the `cosign.pub` from `cosign generate-key-pair`) with either:
 
-- `keyPath` — path to a PEM public key file.
-- `keyData` — the same key, base64-encoded inline.
+- `keyPath`: path to the PEM public key
+- `keyData`: the same key, base64-encoded
 
-Multiple keys (`keyPaths`/`keyDatas`) and keyless (Fulcio/Rekor) verification are **not** supported.
-Signatures are discovered through the OCI [referrers API](https://github.com/opencontainers/distribution-spec/blob/main/spec.md#listing-referrers)
-(the Sigstore bundle, `application/vnd.dev.sigstore.bundle.v0.3+json`, attached to the image); no
-local signature store is consulted. Verification binds the signature to the pulled image by its
-digest. The `signedIdentity` field is **not supported** and is ignored if present, because the
-cosign bundle payload carries only the image digest and no claimed Docker reference to match against.
+Multiple keys (`keyPaths`, `keyDatas`) and keyless Fulcio/Rekor verification aren't supported yet.
+
+The SDK finds signatures through the [Referrers API](https://github.com/opencontainers/distribution-spec/blob/main/spec.md#listing-referrers), looking for a Sigstore bundle (`application/vnd.dev.sigstore.bundle.v0.3+json`) attached to the image. It doesn't read a local signature store. The signature is bound to the pulled image by digest. `signedIdentity` is ignored: the cosign bundle only carries the image digest, so there is no Docker reference to compare against.
 
 ```json
 {
@@ -401,20 +351,6 @@ cosign bundle payload carries only the image digest and no claimed Docker refere
 }
 ```
 
-### Deploy SNAPSHOTS
+## Contributing
 
-SNAPSHOTS are automatically deployed when the `main` branch is updated. See the [GitHub Actions](.github/workflows/deploy-snapshots.yml) for more details.
-
-### Perform release
-
-- Ensure the draft release version correspond to the version on the `pom.xml`. Specially if changing the major or minor version. Patch releases are automatically updated.
-- Run the release workflow
-
-## Code of Conduct
-
-Please note that this project has adopted the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
-Please follow it in all your interactions with the project members and users.
-
-## License
-
-This code is licensed under the Apache 2.0 [LICENSE](LICENSE).
+See [CONTRIBUTING.md](CONTRIBUTING.md). This project follows the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
