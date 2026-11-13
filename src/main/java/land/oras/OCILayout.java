@@ -34,7 +34,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 import land.oras.OCI.PullOptions;
 import land.oras.OCI.PushOptions;
@@ -54,12 +53,7 @@ public final class OCILayout extends OCI<LayoutRef> {
     @SuppressWarnings("all")
     private final String imageLayoutVersion = "1.0.0";
 
-    private final ExecutorService executors = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r);
-        t.setName("layout-transfer-worker-%d".formatted(t.getId()));
-        t.setDaemon(true);
-        return t;
-    });
+    private final ExecutorService executors = newTransferExecutor(1, "layout-transfer-worker");
 
     /**
      * Path on the file system of the OCI Layout

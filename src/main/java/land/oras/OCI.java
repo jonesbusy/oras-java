@@ -35,6 +35,9 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import land.oras.exception.OrasException;
 import land.oras.utils.ArchiveUtils;
@@ -57,6 +60,35 @@ public abstract sealed class OCI<T extends Ref<@NonNull T>> permits Registry, OC
      * The logger
      */
     protected static final Logger LOG = LoggerFactory.getLogger(OCI.class);
+
+    /**
+     * How long an idle transfer worker thread is kept before being released
+     */
+    static final long TRANSFER_WORKER_KEEP_ALIVE_SECONDS = 30;
+
+    /**
+     * Create the default executor for layer transfers. It behaves like a fixed thread pool, but workers are daemon
+     * threads released once idle, so an unused instance holds no thread and needs no explicit shutdown.
+     * @param parallelism The maximum number of concurrent transfers
+     * @param threadName The worker thread name prefix
+     * @return The executor service
+     */
+    static ExecutorService newTransferExecutor(int parallelism, String threadName) {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                parallelism,
+                parallelism,
+                TRANSFER_WORKER_KEEP_ALIVE_SECONDS,
+                TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(),
+                r -> {
+                    Thread t = new Thread(r);
+                    t.setName("%s-%d".formatted(threadName, t.getId()));
+                    t.setDaemon(true);
+                    return t;
+                });
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
+    }
 
     /**
      * Options controlling the behavior of {@link OCI#pushArtifact} operations.
