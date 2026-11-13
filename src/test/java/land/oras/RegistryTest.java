@@ -29,12 +29,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import land.oras.exception.OrasException;
 import land.oras.policy.ContainersPolicy;
 import land.oras.utils.Const;
@@ -43,6 +46,7 @@ import land.oras.utils.SupportedAlgorithm;
 import land.oras.utils.SupportedCompression;
 import land.oras.utils.ZotContainer;
 import land.oras.utils.ZotUnsecureContainer;
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -87,6 +91,40 @@ class RegistryTest {
                 .submit(() -> Thread.currentThread().isDaemon())
                 .get();
         assertTrue(daemon, "Default executor threads must be daemon to not keep the JVM alive");
+    }
+
+    @Test
+    void shouldReuseRegistryAfterIdleThreadsWereReleased() throws Exception {
+        Registry registry = Registry.Builder.builder()
+                .defaults("myuser", "mypass")
+                .withInsecure(true)
+                .withParallelism(3)
+                .build();
+        ThreadPoolExecutor executor = assertInstanceOf(ThreadPoolExecutor.class, registry.getExecutorService());
+
+        // Speed up the idle timeout to not wait for the default one
+        executor.setKeepAliveTime(50, TimeUnit.MILLISECONDS);
+
+        ContainerRef containerRef =
+                ContainerRef.parse("%s/library/artifact-idle-reuse".formatted(this.registry.getRegistry()));
+        Path file1 = Files.writeString(blobDir.resolve("idle1.txt"), "idle1");
+        Path file2 = Files.writeString(blobDir.resolve("idle2.txt"), "idle2");
+        Path file3 = Files.writeString(blobDir.resolve("idle3.txt"), "idle3");
+
+        // Several rounds on the same long-lived registry, with all threads released in between
+        for (int round = 0; round < 3; round++) {
+            Manifest manifest =
+                    registry.pushArtifact(containerRef, LocalPath.of(file1), LocalPath.of(file2), LocalPath.of(file3));
+            assertEquals(3, manifest.getLayers().size());
+            Awaitility.await().atMost(Duration.ofSeconds(5)).until(() -> executor.getPoolSize() == 0);
+
+            Path target = Files.createDirectory(artifactDir.resolve("idle-round-%d".formatted(round)));
+            registry.pullArtifact(containerRef, target, true);
+            assertEquals("idle1", Files.readString(target.resolve("idle1.txt")));
+            assertEquals("idle2", Files.readString(target.resolve("idle2.txt")));
+            assertEquals("idle3", Files.readString(target.resolve("idle3.txt")));
+            Awaitility.await().atMost(Duration.ofSeconds(5)).until(() -> executor.getPoolSize() == 0);
+        }
     }
 
     @Test

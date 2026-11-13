@@ -44,7 +44,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import land.oras.auth.AuthProvider;
@@ -407,12 +406,7 @@ public final class Registry extends OCI<ContainerRef> {
         }
         client = clientBuilder.build();
         if (executorService == null) {
-            executorService = Executors.newFixedThreadPool(maxConcurrentDownloads, r -> {
-                Thread t = new Thread(r);
-                t.setName("layer-transfer-worker-%d".formatted(t.getId()));
-                t.setDaemon(true);
-                return t;
-            });
+            executorService = newTransferExecutor(maxConcurrentDownloads, "layer-transfer-worker");
         }
         return this;
     }
