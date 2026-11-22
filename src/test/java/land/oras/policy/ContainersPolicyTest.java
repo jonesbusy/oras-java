@@ -28,6 +28,7 @@ import java.nio.file.Path;
 import java.security.KeyPair;
 import java.util.List;
 import land.oras.EnvironmentLock;
+import land.oras.Registry;
 import land.oras.TestUtils;
 import land.oras.exception.OrasException;
 import org.junit.jupiter.api.Test;
@@ -43,6 +44,51 @@ import uk.org.webcompere.systemstubs.environment.EnvironmentVariables;
 @Execution(ExecutionMode.SAME_THREAD)
 @ResourceLock(providers = EnvironmentLock.class)
 class ContainersPolicyTest {
+
+    @Test
+    void builderRejectsNullPolicy() {
+        assertThrows(NullPointerException.class, () -> Registry.builder().withPolicy(null));
+    }
+
+    @Test
+    void builderUsesSuppliedPolicy() {
+        ContainersPolicy supplied = ContainersPolicy.of(List.of(new PolicyRequirement.Reject()));
+
+        Registry registry = Registry.builder().withPolicy(supplied).build();
+
+        assertSame(supplied, registry.getContainersPolicy());
+    }
+
+    @Test
+    void acceptAnythingFactoryCreatesAcceptAllPolicy() {
+        ContainersPolicy policy = ContainersPolicy.acceptAnything();
+
+        assertEquals(1, policy.getDefaultRequirements().size());
+        assertInstanceOf(
+                PolicyRequirement.InsecureAcceptAnything.class,
+                policy.getDefaultRequirements().get(0));
+        assertTrue(policy.isAllowed(Transport.DOCKER, "registry.example.com/team/image"));
+    }
+
+    @Test
+    void ofFactoryRejectsEmptyDefaultRequirements() {
+        assertThrows(IllegalArgumentException.class, () -> ContainersPolicy.of(List.of()));
+    }
+
+    @Test
+    void ofFactoryRejectsNullDefaultRequirements() {
+        assertThrows(NullPointerException.class, () -> ContainersPolicy.of(null));
+    }
+
+    @Test
+    void ofFactoryCreatesPolicyFromDefaultRequirements() {
+        ContainersPolicy policy = ContainersPolicy.of(List.of(new PolicyRequirement.Reject()));
+
+        assertEquals(1, policy.getDefaultRequirements().size());
+        assertInstanceOf(
+                PolicyRequirement.Reject.class, policy.getDefaultRequirements().get(0));
+        assertFalse(policy.isAllowed(Transport.DOCKER, "registry.example.com/team/image"));
+    }
 
     @Test
     void loadAcceptAllFromFile() {

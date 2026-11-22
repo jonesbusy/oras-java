@@ -28,6 +28,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import land.oras.OrasModel;
 import land.oras.exception.OrasException;
 import land.oras.utils.JsonUtils;
@@ -76,6 +77,29 @@ public class ContainersPolicy {
     }
 
     /**
+     * Create a policy that accepts any image unconditionally.
+     *
+     * @return a policy with {@code insecureAcceptAnything} as its global default.
+     */
+    public static ContainersPolicy acceptAnything() {
+        return new ContainersPolicy(PolicyFile.fromJson(List.of(new PolicyRequirement.InsecureAcceptAnything()), null));
+    }
+
+    /**
+     * Create a policy with the given global default requirements.
+     *
+     * @param defaultRequirements the global default requirements.
+     * @return a policy using the supplied requirements as its global default.
+     */
+    public static ContainersPolicy of(List<PolicyRequirement> defaultRequirements) {
+        Objects.requireNonNull(defaultRequirements, "defaultRequirements");
+        if (defaultRequirements.isEmpty()) {
+            throw new IllegalArgumentException("defaultRequirements must not be empty");
+        }
+        return new ContainersPolicy(PolicyFile.fromJson(List.copyOf(defaultRequirements), null));
+    }
+
+    /**
      * Load the containers policy from the standard locations.
      *
      * @return a {@link ContainersPolicy} instance.
@@ -90,7 +114,7 @@ public class ContainersPolicy {
             }
         }
 
-        LOG.warn("No containers policy.json found; using insecureAcceptAnything default");
+        LOG.debug("No containers policy.json found; using insecureAcceptAnything default");
         return new ContainersPolicy(PolicyFile.fromJson(List.of(new PolicyRequirement.InsecureAcceptAnything()), null));
     }
 
