@@ -162,7 +162,7 @@ public final class Registry extends OCI<ContainerRef> {
     /**
      * The containers policy for trust verification
      */
-    private ContainersPolicy containersPolicy;
+    private @Nullable ContainersPolicy containersPolicy;
 
     /**
      * Constructor
@@ -171,7 +171,6 @@ public final class Registry extends OCI<ContainerRef> {
         this.authProvider = new NoAuthProvider();
         this.client = HttpClient.Builder.builder().build();
         this.registriesConf = RegistriesConf.newConf();
-        this.containersPolicy = ContainersPolicy.newPolicy(); // Load from standard locations or accept-all
     }
 
     @Override
@@ -302,7 +301,7 @@ public final class Registry extends OCI<ContainerRef> {
      * @return the containers policy
      */
     public ContainersPolicy getContainersPolicy() {
-        return containersPolicy;
+        return Objects.requireNonNull(containersPolicy, "containersPolicy");
     }
 
     /**
@@ -390,6 +389,9 @@ public final class Registry extends OCI<ContainerRef> {
      * @return The provider
      */
     private Registry build() {
+        if (containersPolicy == null) {
+            containersPolicy = ContainersPolicy.newPolicy();
+        }
         HttpClient.Builder clientBuilder = HttpClient.Builder.builder()
                 .withSkipTlsVerify(skipTlsVerify)
                 .withMaxRetries(maxRetries)
@@ -1916,7 +1918,7 @@ public final class Registry extends OCI<ContainerRef> {
             this.registry.setMaxRetryDelayMs(registry.maxRetryDelayMs);
             this.registry.setTagListMaxPages(registry.tagListMaxPages);
             this.registry.setReferrerListMaxPages(registry.referrerListMaxPages);
-            this.registry.setContainersPolicy(registry.containersPolicy);
+            this.registry.setContainersPolicy(registry.getContainersPolicy());
             if (registry.meterRegistry != null) {
                 this.registry.setMeterRegistry(registry.meterRegistry);
             }
@@ -2169,7 +2171,7 @@ public final class Registry extends OCI<ContainerRef> {
          * @see ContainersPolicy#newPolicy()
          */
         public Builder withPolicy(ContainersPolicy policy) {
-            registry.setContainersPolicy(policy);
+            registry.setContainersPolicy(Objects.requireNonNull(policy, "policy"));
             return this;
         }
 
