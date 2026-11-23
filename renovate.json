@@ -12,7 +12,32 @@
     "schedule:weekly"
   ],
   "labels": ["dependencies"],
+  "customDatasources": {
+    "quarkus-lts": {
+      "defaultRegistryUrlTemplate": "https://registry.quarkus.io/client/platforms",
+      "transformTemplates": [
+        "{ \"releases\": platforms[0].streams[lts = true].releases[0].{ \"version\": version } }"
+      ]
+    }
+  },
+  "customManagers": [
+    {
+      "description": "Update Quarkus only to the latest LTS release",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)pom\\.xml$/"],
+      "matchStrings": ["<quarkus\\.version>(?<currentValue>[^<]+)</quarkus\\.version>"],
+      "depNameTemplate": "quarkus-lts",
+      "datasourceTemplate": "custom.quarkus-lts",
+      "versioningTemplate": "maven"
+    }
+  ],
   "packageRules": [
+    {
+      "description": "Quarkus is handled by the quarkus-lts custom manager",
+      "matchManagers": ["maven"],
+      "matchPackageNames": ["io.quarkus:**"],
+      "enabled": false
+    },
     {
       "description": "Keep Jackson 3 on the 3.1 LTS line",
       "matchManagers": ["maven"],
