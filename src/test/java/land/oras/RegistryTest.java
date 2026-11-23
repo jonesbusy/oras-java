@@ -38,6 +38,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import land.oras.auth.RegistriesConf;
 import land.oras.exception.OrasException;
 import land.oras.policy.ContainersPolicy;
 import land.oras.utils.Const;
@@ -2555,6 +2556,73 @@ class RegistryTest {
         assertEquals(expectedMessage, ex.getMessage());
 
         Files.deleteIfExists(policyFile);
+    }
+
+    @Test
+    void shouldRejectNullRegistriesConf() {
+        assertThrows(NullPointerException.class, () -> Registry.builder().withRegistriesConf(null));
+    }
+
+    @Test
+    void shouldDisableRegistriesConf() {
+        RegistriesConf empty = RegistriesConf.newConf(List.of());
+        Registry registry = Registry.builder()
+                .withRegistriesConf(empty)
+                .withRegistry("example.com")
+                .build();
+
+        assertSame(empty, registry.getRegistriesConf());
+        assertEquals(
+                ContainerRef.parse("library/alpine"),
+                registry.getRegistriesConf().rewrite(ContainerRef.parse("library/alpine")));
+    }
+
+    @Test
+    void shouldPreserveRegistriesConfAndTransportLockWhenCopied() {
+        RegistriesConf empty = RegistriesConf.newConf(List.of());
+        Registry registry = Registry.builder()
+                .withRegistriesConf(empty)
+                .withInsecure(false)
+                .withTransportLocked(true)
+                .withRegistry("example.com")
+                .build();
+
+        Registry copy = registry.copy("mirror.example.com");
+
+        assertSame(empty, copy.getRegistriesConf());
+        assertFalse(copy.isInsecure());
+        assertTrue(copy.isTransportLocked());
+    }
+
+    @Test
+    void shouldUnlockTransportExplicitly() {
+        Registry registry = Registry.builder()
+                .withInsecure(true)
+                .withTransportLocked(true)
+                .withTransportLocked(false)
+                .build();
+
+        assertFalse(registry.isTransportLocked());
+    }
+
+    @Test
+    void shouldLockTransportExplicitly() {
+        Registry https =
+                Registry.builder().withInsecure(false).withTransportLocked(true).build();
+        Registry http =
+                Registry.builder().withInsecure(true).withTransportLocked(true).build();
+
+        assertTrue(https.isTransportLocked());
+        assertTrue(http.isTransportLocked());
+    }
+
+    @Test
+    void withInsecureShouldNotLockTransport() {
+        Registry https = Registry.builder().withInsecure(false).build();
+        Registry http = Registry.builder().withInsecure(true).build();
+
+        assertFalse(https.isTransportLocked());
+        assertFalse(http.isTransportLocked());
     }
 
     private Path createRejectPolicy(Path tempDir) throws IOException {

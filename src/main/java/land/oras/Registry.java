@@ -84,7 +84,7 @@ public final class Registry extends OCI<ContainerRef> {
     /**
      * The registries configuration loaded from the environment
      */
-    private RegistriesConf registriesConf;
+    private @Nullable RegistriesConf registriesConf;
 
     /**
      * The HTTP client
@@ -170,7 +170,6 @@ public final class Registry extends OCI<ContainerRef> {
     private Registry() {
         this.authProvider = new NoAuthProvider();
         this.client = HttpClient.Builder.builder().build();
-        this.registriesConf = RegistriesConf.newConf();
     }
 
     @Override
@@ -243,7 +242,7 @@ public final class Registry extends OCI<ContainerRef> {
      * @return The registries configuration
      */
     public RegistriesConf getRegistriesConf() {
-        return registriesConf;
+        return Objects.requireNonNull(registriesConf, "registriesConf");
     }
 
     /**
@@ -384,6 +383,10 @@ public final class Registry extends OCI<ContainerRef> {
         this.containersPolicy = containersPolicy;
     }
 
+    private void setRegistriesConf(RegistriesConf registriesConf) {
+        this.registriesConf = Objects.requireNonNull(registriesConf, "registriesConf");
+    }
+
     /**
      * Build the provider
      * @return The provider
@@ -407,6 +410,9 @@ public final class Registry extends OCI<ContainerRef> {
             clientBuilder = clientBuilder.withMeterRegistry(meterRegistry);
         }
         client = clientBuilder.build();
+        if (registriesConf == null) {
+            registriesConf = RegistriesConf.newConf();
+        }
         if (executorService == null) {
             executorService = newTransferExecutor(maxConcurrentDownloads, "layer-transfer-worker");
         }
@@ -1919,6 +1925,7 @@ public final class Registry extends OCI<ContainerRef> {
             this.registry.setTagListMaxPages(registry.tagListMaxPages);
             this.registry.setReferrerListMaxPages(registry.referrerListMaxPages);
             this.registry.setContainersPolicy(registry.getContainersPolicy());
+            this.registry.setRegistriesConf(registry.getRegistriesConf());
             if (registry.meterRegistry != null) {
                 this.registry.setMeterRegistry(registry.meterRegistry);
             }
@@ -2058,13 +2065,23 @@ public final class Registry extends OCI<ContainerRef> {
         }
 
         /**
-         * Lock the transport decision so it is taken from the {@code insecure} flag of this builder
-         * rather than re-resolved from registries.conf. Used for mirror connections.
+         * Lock or unlock the transport decision for this registry.
          * @param transportLocked Whether the transport is explicitly decided
          * @return The builder
          */
-        Builder withTransportLocked(boolean transportLocked) {
+        public Builder withTransportLocked(boolean transportLocked) {
             registry.setTransportLocked(transportLocked);
+            return this;
+        }
+
+        /**
+         * Set the registries.conf configuration to use for registry aliases, mirrors, and blocking.
+         * Pass {@code RegistriesConf.newConf(List.of())} to disable host and user configuration.
+         * @param registriesConf The registries.conf configuration
+         * @return The builder
+         */
+        public Builder withRegistriesConf(RegistriesConf registriesConf) {
+            registry.setRegistriesConf(registriesConf);
             return this;
         }
 
