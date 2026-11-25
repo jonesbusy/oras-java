@@ -60,7 +60,7 @@
 
     <!-- Dependency versions -->
     <quarkus.version>3.40.1.2</quarkus.version>
-    <jackson.version>3.1.8</jackson.version>
+    <jackson.version>3.1.9</jackson.version>
     <logback.version>1.6.8</logback.version>
     <wiremock.version>3.13.2</wiremock.version>
     <system.stubs.version>2.1.8</system.stubs.version>
