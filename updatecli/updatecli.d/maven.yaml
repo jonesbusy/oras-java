@@ -23,19 +23,34 @@ sources:
       username: "{{ .github.username }}"
       versionFilter:
         kind: regex
-        pattern: "maven-3.(\\d{1,2}).(\\d{1,2})$"
+        pattern: "^maven-3\\.(\\d{1,2})\\.\\d+$"
     transformers:
       - trimprefix: "maven-"
+  mavenLatestMinor:
+    kind: githubrelease
+    spec:
+      owner: "apache"
+      repository: "maven"
+      token: "{{ requiredEnv .github.token }}"
+      username: "{{ .github.username }}"
+      versionFilter:
+        kind: regex
+        pattern: "^maven-3\\.(\\d{1,2})\\.\\d+$"
+    transformers:
+      - trimprefix: "maven-"
+      - findsubmatch:
+          pattern: "^(\\d+\\.\\d+)\\.\\d+$"
+          captureindex: 1
 
 targets:
   updatePom:
-    name: "Update the value in the pom.xml file"
+    name: "Update the Maven enforcer minor version"
     kind: file
-    sourceid: mavenLatestVersion
+    sourceid: mavenLatestMinor
     spec:
       file: pom.xml
-      matchPattern: "<version>\\[(\\d.\\d{1,2}.\\d{1,2}),\\)</version>"
-      replacePattern: '<version>[{{ source "mavenLatestVersion" }},)</version>'
+      matchPattern: "<version>\\[(\\d+\\.\\d+(\\.\\d+)?),\\)</version>"
+      replacePattern: '<version>[{{ source "mavenLatestMinor" }},)</version>'
     scmid: default
   updateSdkmanRC:
     name: "Update the value in the .sdkmanrc file"
@@ -43,7 +58,7 @@ targets:
     sourceid: mavenLatestVersion
     spec:
       file: .sdkmanrc
-      matchPattern: "maven=(\\d.\\d{1,2}.\\d{1,2})"
+      matchPattern: "maven=(\\d+\\.\\d+(\\.\\d+)?)"
       replacePattern: 'maven={{ source "mavenLatestVersion" }}'
     scmid: default
   updateWorkflowFiles:
@@ -52,7 +67,7 @@ targets:
     sourceid: mavenLatestVersion
     spec:
       file: .github/vars/maven-version.txt
-      matchPattern: "(\\d.\\d{1,2}.\\d{1,2})"
+      matchPattern: "(\\d+\\.\\d+(\\.\\d+)?)"
       replacePattern: '{{ source "mavenLatestVersion" }}'
     scmid: default
 

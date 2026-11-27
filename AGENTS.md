@@ -1,30 +1,25 @@
-# AGENTS.md
+# ORAS Java
 
-oras-java is a Java 17 SDK for [ORAS](https://oras.land/): push and pull OCI artifacts to OCI registries and local OCI layouts. Single Maven module, sources under `src/main/java/land/oras/`.
+Java 17 SDK for [ORAS](https://oras.land/), built as one Maven module. Sources are in `src/main/java/land/oras/`.
 
 ## Commands
 
-```bash
-mvn clean install                  # full build: format, license, javadoc checks + tests
-mvn clean install -Pquick-build    # skip tests and all checks
-mvn test -Dtest=RegistryTest       # one test class
-mvn verify                         # integration tests (*ITCase), need Docker/Podman
-mvn spotless:apply                 # Palantir Java Format
-mvn license:update-file-header     # add missing Apache 2.0 headers
-mvn javadoc:javadoc                # fails on any warning
-```
+- `mvn clean install` — full build, formatting, license, Javadoc, and tests
+- `mvn clean install -Pquick-build` — skip tests and checks
+- `mvn test -Dtest=RegistryTest` — run one test class
+- `mvn verify` — integration tests (`*ITCase`); Docker or Podman required
+- `mvn javadoc:javadoc` — Javadoc; warnings fail the build
 
-## Rules that apply to every change
+## Universal rules
 
-- Run `mvn spotless:apply` and `mvn license:update-file-header` before finishing. The build fails on unformatted code or missing headers.
-- Public API needs Javadoc that compiles without warnings (`failOnWarnings=true`).
-- Use JSpecify `@Nullable` / `@NonNull` for nullability.
-- Model classes are immutable. Derive copies with `with*()` methods. Keep `@JsonPropertyOrder` on them: serialized JSON must be byte-stable or digests change.
-- Blocked/insecure/policy checks run on the resolved reference, after rewriting and mirror selection. Don't move them earlier. See [security.md](docs/agents/security.md).
-- CI runs on Java 17, 21 and 25. Don't use APIs newer than 17.
+- Before finishing: `mvn spotless:apply` and `mvn license:update-file-header`.
+- Public API requires warning-free Javadoc.
+- Use JSpecify `@Nullable` / `@NonNull`; do not introduce APIs newer than Java 17.
+- Keep model classes immutable, add `with*()` copies, and retain `@JsonPropertyOrder` for stable serialized bytes.
+- Security checks use the resolved reference after rewrites and mirror selection.
 
-## More detail
+## Detailed guidelines
 
-- [Architecture](docs/agents/architecture.md): packages, `OCI` / `Registry` / `OCILayout`, data models, auth
-- [Security model](docs/agents/security.md): reference resolution order, mirrors, trust policy limits
-- [Testing](docs/agents/testing.md): unit vs integration tests, Zot containers, parallel execution and env locks
+- [Architecture](docs/agents/architecture.md) — packages, core types, models, authentication
+- [Security model](docs/agents/security.md) — resolution order, mirrors, policy, credentials
+- [Testing](docs/agents/testing.md) — test types, containers, parallelism, environment locks
